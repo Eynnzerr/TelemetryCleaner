@@ -1,0 +1,82 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    if: github.event.created
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Install Android SDK
+        run: sdkmanager --install 'platforms;android-37.0' 'build-tools;36.0.0'
+
+      - name: Build signed release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${ANDROID_KEYSTORE_BASE64:?Set the ANDROID_KEYSTORE_BASE64 Actions secret}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Set the ANDROID_KEYSTORE_PASSWORD Actions secret}"
+          : "${ANDROID_KEY_ALIAS:?Set the ANDROID_KEY_ALIAS Actions secret}"
+          : "${ANDROID_KEY_PASSWORD:?Set the ANDROID_KEY_PASSWORD Actions secret}"
+
+          ANDROID_KEYSTORE_PATH="$(mktemp "$RUNNER_TEMP/telemetry-cleaner.XXXXXX")"
+          export ANDROID_KEYSTORE_PATH
+          trap 'unlink "$ANDROID_KEYSTORE_PATH"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          unset ANDROID_KEYSTORE_BASE64
+
+          bash ./gradlew :app:assembleRelease --no-configuration-cache --console=plain
+
+      - name: Verify APK and tag
+        id: apk
+        run: |
+          output_dir=app/build/outputs/apk/release
+          metadata="$output_dir/output-metadata.json"
+          version="$(jq -er '.elements[0].versionName' "$metadata")"
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            printf 'Tag %s must match APK version v%s.\n' "$GITHUB_REF_NAME" "$version" >&2
+            exit 1
+          fi
+
+          apk="$output_dir/$(jq -er '.elements[0].outputFile' "$metadata")"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
+          asset="$RUNNER_TEMP/TelemetryCleaner-${GITHUB_REF_NAME}.apk"
+          cp "$apk" "$asset"
+          printf 'path=%s\n' "$asset" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_APK: ${{ steps.apk.outputs.path }}
+        run: |
+          options=(--verify-tag --generate-notes --title "TelemetryCleaner $GITHUB_REF_NAME")
+          if [[ "${GITHUB_REF_NAME%%+*}" == *-* ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "$RELEASE_APK" "${options[@]}"
