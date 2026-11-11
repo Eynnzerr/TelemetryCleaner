@@ -1,7 +1,7 @@
 package com.eynnzerr.telemetrycleaner.data
 
 import android.content.pm.PackageManager
-import android.os.Build
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
@@ -21,8 +21,13 @@ internal data class PackageRecord(
 internal sealed interface PackageReading {
     data class Found(val record: PackageRecord) : PackageReading
     data object Missing : PackageReading
-    data object Unavailable : PackageReading
+
+    /** The reason an exact package lookup did not produce a usable answer. */
+    data class Unavailable(val issue: PackageScanIssue) : PackageReading
 }
+
+/** Indicates why the user spaces needed to start a scan could not be determined. */
+internal class UserListScanException(val issue: PackageScanIssue) : Exception()
 
 /** Queries and changes only catalogued carrier packages through the Android shell. */
 internal object PackageCommands {
@@ -36,28 +41,42 @@ internal object PackageCommands {
     /** Resolves the requested catalogue variants and their states in each visible Android user. */
     suspend fun scan(callerUser: Int, packageNames: Set<String>, permissionManager: PackageManager?): ScanSnapshot {
         val users = listUsers()
-        check(users.any { it.id == callerUser }) { "无法识别应用所在的用户空间。" }
-        val expectedNames = PackageDirectory.expectedNames(Build.MANUFACTURER, Build.BRAND)
-        val packages = packageNames.mapNotNull { packageName ->
+        if (users.none { it.id == callerUser }) throw UserListScanException(PackageScanIssue.USER_STATE_MISSING)
+        val packages = packageNames.map { packageName ->
             currentCoroutineContext().ensureActive()
             val entry = PackageDirectory.variants.getValue(packageName)
-            val reading = read(packageName, permissionManager)
-            when (reading) {
-                is PackageReading.Found -> DetectedPackage(
-                    entry = entry,
-                    versionName = reading.record.versionName,
-                    versionCode = reading.record.versionCode,
-                    systemPath = reading.record.codePath,
-                    users = users.associate { it.id to (reading.record.users[it.id] ?: PackageState.UNKNOWN) },
-                    canManage = canManage(reading.record),
-                    permissions = reading.record.permissions,
-                )
-                else -> if (packageName in expectedNames) {
-                    val state = if (reading == PackageReading.Missing) PackageState.NOT_FOUND else PackageState.UNKNOWN
-                    DetectedPackage(entry, null, null, null, users.associate { it.id to state }, false)
-                } else {
-                    null
+            when (val reading = read(packageName, permissionManager)) {
+                is PackageReading.Found -> {
+                    val states = users.associate { it.id to (reading.record.users[it.id] ?: PackageState.UNKNOWN) }
+                    DetectedPackage(
+                        entry = entry,
+                        versionName = reading.record.versionName,
+                        versionCode = reading.record.versionCode,
+                        systemPath = reading.record.codePath,
+                        users = states,
+                        canManage = canManage(reading.record),
+                        permissions = reading.record.permissions,
+                        scanIssues = states.filterValues { it == PackageState.UNKNOWN }
+                            .mapValues { PackageScanIssue.USER_STATE_MISSING },
+                    )
                 }
+                PackageReading.Missing -> DetectedPackage(
+                    entry = entry,
+                    versionName = null,
+                    versionCode = null,
+                    systemPath = null,
+                    users = users.associate { it.id to PackageState.NOT_FOUND },
+                    canManage = false,
+                )
+                is PackageReading.Unavailable -> DetectedPackage(
+                    entry = entry,
+                    versionName = null,
+                    versionCode = null,
+                    systemPath = null,
+                    users = users.associate { it.id to PackageState.UNKNOWN },
+                    canManage = false,
+                    scanIssues = users.associate { it.id to reading.issue },
+                )
             }
         }
         return ScanSnapshot(callerUser, users, packages)
@@ -65,23 +84,73 @@ internal object PackageCommands {
 
     /** Returns the package-manager users visible to the service. */
     private fun listUsers(): List<AndroidUser> {
-        val result = PackageBinder.execute(listOf("list", "users"))
-        check(result.exitCode == 0) { "Android 拒绝读取用户空间。" }
-        return result.output.lineSequence().mapNotNull { line ->
+        val result = query({ throw UserListScanException(it) }) {
+            PackageBinder.execute(listOf("list", "users"))
+        }
+        result.queryIssue()?.let { throw UserListScanException(it) }
+        val users = result.output.lineSequence().mapNotNull { line ->
             val match = listedUser.matchEntire(line) ?: return@mapNotNull null
             val id = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
             val name = match.groupValues[2].ifBlank { id.toString() }
             AndroidUser(id, name)
         }.distinctBy(AndroidUser::id).toList()
+        if (users.isEmpty()) throw UserListScanException(PackageScanIssue.UNRECOGNIZED_RESPONSE)
+        return users
     }
 
     /** Reads the exact package directly because some ROMs omit it from package lists. */
     private fun read(packageName: String, permissionManager: PackageManager? = null): PackageReading {
-        val direct = PackageBinder.execute(listOf("dump", packageName))
-        val parsed = parseDump(packageName, direct, permissionManager)
-        if (parsed != PackageReading.Unavailable) return parsed
-        val dump = PackageBinder.dump(packageName)
-        return parseDump(packageName, dump, permissionManager)
+        val direct = readDump(packageName, permissionManager) { PackageBinder.execute(listOf("dump", packageName)) }
+        if (direct !is PackageReading.Unavailable) return direct
+        val fallback = readDump(packageName, permissionManager) { PackageBinder.dump(packageName) }
+        if (fallback !is PackageReading.Unavailable) return fallback
+        return when {
+            direct.issue == PackageScanIssue.PERMISSION_DENIED -> direct
+            fallback.issue == PackageScanIssue.UNRECOGNIZED_RESPONSE -> direct
+            else -> fallback
+        }
+    }
+
+    /** Converts Binder transport failures to a reason before parsing the package response. */
+    private inline fun readDump(
+        packageName: String,
+        permissionManager: PackageManager?,
+        request: () -> PackageShellResult,
+    ): PackageReading {
+        val result = query({ return PackageReading.Unavailable(it) }, request)
+        return parseDump(packageName, result, permissionManager)
+    }
+
+    /** Classifies failures from Android without swallowing coroutine cancellation. */
+    private inline fun query(
+        fail: (PackageScanIssue) -> Nothing,
+        request: () -> PackageShellResult,
+    ): PackageShellResult = try {
+        request()
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (_: SecurityException) {
+        fail(PackageScanIssue.PERMISSION_DENIED)
+    } catch (_: Exception) {
+        fail(PackageScanIssue.QUERY_FAILED)
+    }
+
+    /** Detects access denials and failed commands even if Binder itself completed. */
+    private fun PackageShellResult.queryIssue(): PackageScanIssue? {
+        val denied = output.lineSequence().any { line ->
+            val text = line.trimStart()
+            val message = if (text.startsWith("Error:", ignoreCase = true)) text.drop(6).trimStart() else text
+            message.startsWith("Permission Denial", ignoreCase = true) ||
+                message.startsWith("Permission denied", ignoreCase = true) ||
+                message.startsWith("Security exception:", ignoreCase = true) ||
+                message.startsWith("SecurityException", ignoreCase = true) ||
+                message.startsWith("java.lang.SecurityException", ignoreCase = true)
+        }
+        return when {
+            denied -> PackageScanIssue.PERMISSION_DENIED
+            exitCode != 0 -> PackageScanIssue.QUERY_FAILED
+            else -> null
+        }
     }
 
     /** Verifies the active record of a catalogued package, including after OTA. */
@@ -147,6 +216,8 @@ internal object PackageCommands {
         result: PackageShellResult,
         permissionManager: PackageManager?,
     ): PackageReading {
+        val issue = result.queryIssue()
+        if (issue == PackageScanIssue.PERMISSION_DENIED) return PackageReading.Unavailable(issue)
         val lines = result.output.lines()
         val section = lines.indexOfFirst { it.trimEnd() == "Packages:" }
         if (section >= 0) {
@@ -154,6 +225,7 @@ internal object PackageCommands {
                 .takeWhile { it.isBlank() || it.first().isWhitespace() }
             val start = packages.indexOfFirst { packageHeader.matchEntire(it)?.groupValues?.get(1) == packageName }
             if (start >= 0) {
+                if (issue != null) return PackageReading.Unavailable(issue)
                 val block = packages.drop(start + 1).takeWhile { !packageHeader.matches(it) }
                 val record = parseRecord(block)
                 val permissions = permissionManager?.let { readComponentPermissions(packageName, record, block, lines, it) }
@@ -163,7 +235,11 @@ internal object PackageCommands {
         val missing = lines.any {
             it.trim().equals("Unable to find package: " + packageName, ignoreCase = true)
         }
-        return if (missing) PackageReading.Missing else PackageReading.Unavailable
+        return if (missing) {
+            PackageReading.Missing
+        } else {
+            PackageReading.Unavailable(issue ?: PackageScanIssue.UNRECOGNIZED_RESPONSE)
+        }
     }
 
     private fun parseRecord(lines: List<String>): PackageRecord {

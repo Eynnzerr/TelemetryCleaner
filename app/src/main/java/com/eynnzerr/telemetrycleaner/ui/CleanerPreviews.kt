@@ -33,6 +33,7 @@ import com.eynnzerr.telemetrycleaner.data.DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageEntry
+import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
 import com.eynnzerr.telemetrycleaner.data.PermissionProtection
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
@@ -127,11 +128,19 @@ internal class CleanerScreenPreviewProvider : PreviewParameterProvider<CleanerSt
             samplePackage(telecom, PackageState.NOT_FOUND),
             samplePackage(mobile, PackageState.NOT_FOUND),
         ),
-        "检测结果待核验" to scannedState(
-            samplePackage(unicom, PackageState.UNKNOWN),
-            samplePackage(telecom, PackageState.NOT_FOUND),
-            samplePackage(mobile, PackageState.UNKNOWN),
+        "组件查询失败 · 显示原因" to scannedState(
+            samplePackage(unicom, PackageState.UNKNOWN)
+                .copy(scanIssues = mapOf(owner.id to PackageScanIssue.PERMISSION_DENIED)),
+            samplePackage(telecom, PackageState.UNKNOWN)
+                .copy(scanIssues = mapOf(owner.id to PackageScanIssue.UNRECOGNIZED_RESPONSE)),
+            samplePackage(mobile, PackageState.INSTALLED),
+            samplePackage(unassigned, PackageState.UNKNOWN)
+                .copy(scanIssues = mapOf(owner.id to PackageScanIssue.QUERY_FAILED)),
         ),
+        "分身安装状态缺失" to scannedState(
+            samplePackage(unicom, PackageState.INSTALLED, PackageState.UNKNOWN)
+                .copy(scanIssues = mapOf(clone.id to PackageScanIssue.USER_STATE_MISSING)),
+        ).copy(selectedUserIds = bothSpaces),
         "已停用" to scannedState(samplePackage(unicom, PackageState.DISABLED)),
         "两家共用 · 仅查看" to scannedState(samplePackage(shared, PackageState.INSTALLED, canManage = false)),
         "运营商归属待核验" to scannedState(
@@ -149,7 +158,10 @@ internal class CleanerScreenPreviewProvider : PreviewParameterProvider<CleanerSt
             samplePackage(unicom, PackageState.UNKNOWN, PackageState.RESTORABLE, hasPackageRecord = true),
             samplePackage(telecom, PackageState.INSTALLED),
         ).copy(activity = CleanerActivity.CHANGING),
-        "检测失败" to CleanerState(connection = ShizukuStatus.READY, error = CleanerError.SCAN_FAILED),
+        "无法读取用户空间" to CleanerState(
+            connection = ShizukuStatus.READY,
+            error = CleanerError.SCAN_SPACE_PERMISSION_DENIED,
+        ),
         "刷新失败 · 上次结果" to scan.copy(error = CleanerError.SCAN_FAILED),
         "操作失败 · 上次结果" to scan.copy(error = CleanerError.ACTION_FAILED),
         "连接断开 · 上次结果" to scan.copy(connection = ShizukuStatus.STOPPED),

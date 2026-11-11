@@ -73,12 +73,17 @@
     <string name="scan_preparing">正在准备检测</string>
     <string name="scan_unavailable">暂时无法检测</string>
     <string name="scan_ready_description">检查各空间中的组件安装状态。</string>
-    <string name="scan_failed">无法核验安装状态，请刷新重试。</string>
+    <string name="scan_failed">检测遇到意外错误，请刷新重试。</string>
+    <string name="scan_space_query_failed">系统用户空间查询失败。</string>
+    <string name="scan_space_permission_denied">系统拒绝读取用户空间。</string>
+    <string name="scan_space_response_invalid">无法识别系统返回的用户空间列表。</string>
+    <string name="scan_current_space_missing">系统未返回当前用户空间。</string>
     <string name="action_failed">操作未能完成，请刷新检查当前状态。</string>
     <plurals name="installed_components">
         <item quantity="other">%d 个已安装</item>
     </plurals>
-    <string name="summary_unverified">部分组件状态无法核验。</string>
+    <string name="summary_scan_incomplete">检测不完整</string>
+    <string name="summary_scan_incomplete_description">部分组件状态无法确认，原因见下方。</string>
     <string name="section_components">已识别数据泄露组件</string>
     <string name="select_all">全选</string>
     <string name="deselect_all">取消全选</string>
@@ -138,6 +143,12 @@
     <string name="status_disabled">已停用</string>
     <string name="status_restorable">已卸载</string>
     <string name="status_not_found">未检出</string>
+    <string name="status_known_components_not_found">未检出已知组件</string>
+    <string name="status_installation_recheck">等待复查安装状态</string>
+    <string name="scan_package_query_failed">系统包管理器查询失败</string>
+    <string name="scan_package_permission_denied">系统拒绝读取组件信息</string>
+    <string name="scan_package_response_invalid">无法识别系统返回的组件信息</string>
+    <string name="scan_package_space_state_missing">系统未返回该空间的安装状态</string>
     <string name="status_unknown">待核验</string>
     <string name="status_in_space">%1$s · %2$s</string>
     <string name="state_read_only">此机型仅可检测</string>

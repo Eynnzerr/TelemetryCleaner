@@ -10,7 +10,14 @@ import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
 enum class CleanerActivity { IDLE, SCANNING, CHANGING }
 
 /** A screen-level failure that can be described with localized UI copy. */
-enum class CleanerError { SCAN_FAILED, ACTION_FAILED }
+enum class CleanerError {
+    SCAN_FAILED,
+    SCAN_SPACE_QUERY_FAILED,
+    SCAN_SPACE_PERMISSION_DENIED,
+    SCAN_SPACE_RESPONSE_INVALID,
+    SCAN_CURRENT_SPACE_MISSING,
+    ACTION_FAILED,
+}
 
 /** The currently presented sheet and the data needed to render it. */
 sealed interface CleanerPanel {

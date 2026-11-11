@@ -96,19 +96,4 @@ internal object PackageDirectory {
         "com.coloros.regservice",
         "com.miui.dmregservice",
     )
-
-    /**
-     * Returns the names whose absence can be reported on ROM families with an evidenced mapping.
-     * Other families are still scanned for every variant and show unknown when no match is found.
-     */
-    fun expectedNames(manufacturer: String, brand: String): Set<String> {
-        val manufacturerNames = setOf(manufacturer.lowercase(), brand.lowercase())
-        val family = when {
-            manufacturerNames.any { it in setOf("oppo", "oneplus", "realme") } -> PackageFamily.COLOR_OS
-            manufacturerNames.any { it in setOf("xiaomi", "redmi", "poco") } -> PackageFamily.XIAOMI
-            else -> return emptySet()
-        }
-        return (groups.getValue(PackageFamily.CROSS_VENDOR) + groups.getValue(family))
-            .mapTo(mutableSetOf(), PackageEntry::packageName)
-    }
 }

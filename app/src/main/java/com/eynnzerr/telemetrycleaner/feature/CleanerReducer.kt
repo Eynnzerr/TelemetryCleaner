@@ -20,9 +20,12 @@ internal sealed interface CleanerMessage {
     /** The scan with [id] completed; [preferences] defines the current operation scope. */
     data class ScanFinished(
         val id: Long,
-        val snapshot: ScanSnapshot?,
+        val snapshot: ScanSnapshot,
         val preferences: CleanerPreferences,
     ) : CleanerMessage
+
+    /** The scan with [id] failed for the given [error]. */
+    data class ScanFailed(val id: Long, val error: CleanerError) : CleanerMessage
 
     /** A background cleanup may have changed one or more package states. */
     data object AutomaticChanges : CleanerMessage
@@ -69,6 +72,10 @@ internal object CleanerReducer {
         is CleanerMessage.Intent -> reduceIntent(state, message.value)
         is CleanerMessage.ConnectionChanged -> connectionChanged(state, message.status)
         is CleanerMessage.ScanFinished -> scanFinished(state, message)
+        is CleanerMessage.ScanFailed -> CleanerTransition(
+            if (state.isCurrentScan(message.id)) state.copy(activity = CleanerActivity.IDLE, error = message.error)
+            else state,
+        )
         CleanerMessage.AutomaticChanges -> {
             if (state.connection == ShizukuStatus.READY && state.activity != CleanerActivity.CHANGING) {
                 startScan(state)
@@ -148,13 +155,9 @@ internal object CleanerReducer {
         state: CleanerState,
         message: CleanerMessage.ScanFinished,
     ): CleanerTransition {
-        if (state.activity != CleanerActivity.SCANNING || state.workId != message.id) {
-            return CleanerTransition(state)
-        }
+        if (!state.isCurrentScan(message.id)) return CleanerTransition(state)
 
-        val snapshot = message.snapshot ?: return CleanerTransition(
-            state.copy(activity = CleanerActivity.IDLE, error = CleanerError.SCAN_FAILED),
-        )
+        val snapshot = message.snapshot
         val panel = state.panel
         val updated = state.copy(
             snapshot = snapshot,
@@ -172,6 +175,10 @@ internal object CleanerReducer {
         )
         return CleanerTransition(updated.retainEligiblePackages())
     }
+
+    /** Checks that the reported scan still matches the in-flight request. */
+    private fun CleanerState.isCurrentScan(id: Long): Boolean =
+        activity == CleanerActivity.SCANNING && workId == id
 
     /** Accepts a selection change only for a user known in the current scan. */
     private fun toggleSpace(state: CleanerState, userId: Int): CleanerTransition {

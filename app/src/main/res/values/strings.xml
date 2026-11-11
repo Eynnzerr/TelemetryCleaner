@@ -74,13 +74,18 @@
     <string name="scan_preparing">Preparing to check</string>
     <string name="scan_unavailable">Check unavailable</string>
     <string name="scan_ready_description">Check installation status in each available space.</string>
-    <string name="scan_failed">Could not verify package status. Refresh to try again.</string>
+    <string name="scan_failed">The scan ran into an unexpected error. Refresh to try again.</string>
+    <string name="scan_space_query_failed">The system query for user spaces failed.</string>
+    <string name="scan_space_permission_denied">The system denied access to user spaces.</string>
+    <string name="scan_space_response_invalid">The system returned an unrecognized list of user spaces.</string>
+    <string name="scan_current_space_missing">The system did not include the current user space.</string>
     <string name="action_failed">Could not finish this operation. Refresh to check the current status.</string>
     <plurals name="installed_components">
         <item quantity="one">%d installed component</item>
         <item quantity="other">%d installed components</item>
     </plurals>
-    <string name="summary_unverified">Some components could not be verified.</string>
+    <string name="summary_scan_incomplete">Incomplete scan</string>
+    <string name="summary_scan_incomplete_description">Some component states could not be confirmed. See the reasons below.</string>
     <string name="section_components">Carrier components</string>
     <string name="select_all">Select all</string>
     <string name="deselect_all">Deselect all</string>
@@ -140,6 +145,12 @@
     <string name="status_disabled">Disabled</string>
     <string name="status_restorable">Uninstalled</string>
     <string name="status_not_found">Not found</string>
+    <string name="status_known_components_not_found">No known components found</string>
+    <string name="status_installation_recheck">Waiting to recheck installation status</string>
+    <string name="scan_package_query_failed">The system package query failed</string>
+    <string name="scan_package_permission_denied">The system denied access to component information</string>
+    <string name="scan_package_response_invalid">The system returned unrecognized component information</string>
+    <string name="scan_package_space_state_missing">The system did not report installation status for this space</string>
     <string name="status_unknown">Unverified</string>
     <string name="status_in_space">%1$s · %2$s</string>
     <string name="state_read_only">Changes unavailable on this device</string>

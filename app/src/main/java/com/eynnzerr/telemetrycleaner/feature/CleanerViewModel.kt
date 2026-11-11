@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
 import com.eynnzerr.telemetrycleaner.data.CleanerRepository
 import com.eynnzerr.telemetrycleaner.data.CleanerSettings
+import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
+import com.eynnzerr.telemetrycleaner.data.UserListScanException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -83,13 +85,22 @@ internal class CleanerViewModel(
 
     /** Reads package states without blocking the message loop. */
     private suspend fun scan(id: Long) {
-        val snapshot = try {
-            repository.scan()
+        val message = try {
+            CleanerMessage.ScanFinished(id, repository.scan(), settings.readPreferences())
+        } catch (failure: UserListScanException) {
+            currentCoroutineContext().ensureActive()
+            val error = when (failure.issue) {
+                PackageScanIssue.QUERY_FAILED -> CleanerError.SCAN_SPACE_QUERY_FAILED
+                PackageScanIssue.PERMISSION_DENIED -> CleanerError.SCAN_SPACE_PERMISSION_DENIED
+                PackageScanIssue.UNRECOGNIZED_RESPONSE -> CleanerError.SCAN_SPACE_RESPONSE_INVALID
+                PackageScanIssue.USER_STATE_MISSING -> CleanerError.SCAN_CURRENT_SPACE_MISSING
+            }
+            CleanerMessage.ScanFailed(id, error)
         } catch (_: Exception) {
             currentCoroutineContext().ensureActive()
-            null
+            CleanerMessage.ScanFailed(id, CleanerError.SCAN_FAILED)
         }
-        messages.send(CleanerMessage.ScanFinished(id, snapshot, settings.readPreferences()))
+        messages.send(message)
     }
 
     /** Performs the confirmed mutation and reports each target's result. */

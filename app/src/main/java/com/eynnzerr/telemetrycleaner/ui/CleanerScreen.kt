@@ -85,6 +85,7 @@ import com.eynnzerr.telemetrycleaner.data.ChangeTarget
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
+import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
 import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
@@ -140,6 +141,10 @@ fun CleanerScreen(
                                 text = stringResource(
                                     when (error) {
                                         CleanerError.SCAN_FAILED -> R.string.scan_failed
+                                        CleanerError.SCAN_SPACE_QUERY_FAILED -> R.string.scan_space_query_failed
+                                        CleanerError.SCAN_SPACE_PERMISSION_DENIED -> R.string.scan_space_permission_denied
+                                        CleanerError.SCAN_SPACE_RESPONSE_INVALID -> R.string.scan_space_response_invalid
+                                        CleanerError.SCAN_CURRENT_SPACE_MISSING -> R.string.scan_current_space_missing
                                         CleanerError.ACTION_FAILED -> R.string.action_failed
                                     },
                                 ),
@@ -156,10 +161,13 @@ fun CleanerScreen(
                     items(Carrier.entries.size, key = { Carrier.entries[it].name }) { index ->
                         CarrierGroup(Carrier.entries[index], snapshot, state, onIntent)
                     }
-                    val candidates = snapshot.packages.filter { result ->
-                        result.entry.carriers.isEmpty() && result.systemPath != null
+                    val (candidates, unreadCandidates) = snapshot.packages
+                        .filter { it.entry.carriers.isEmpty() }
+                        .partition { it.hasVisibleRecord() }
+                    val candidateIssues = unreadCandidates.filter { result ->
+                        state.selectedUserIds.any { result.hasUnresolvedStatus(it) }
                     }
-                    if (candidates.isNotEmpty()) {
+                    if (candidates.isNotEmpty() || candidateIssues.isNotEmpty()) {
                         item(key = "unverified_components") {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
@@ -173,6 +181,7 @@ fun CleanerScreen(
                                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                                             .semantics { heading() },
                                     )
+                                    PackageScanIssues(candidateIssues, state.selectedUserIds)
                                     candidates.forEach { ComponentRow(it, snapshot, state, onIntent) }
                                 }
                             }
@@ -222,8 +231,8 @@ private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) 
     val colors = MaterialTheme.colorScheme
     val snapshot = state.snapshot
     val busy = state.activity != CleanerActivity.IDLE || state.connection == ShizukuStatus.CONNECTING
-    val hasUnverified = snapshot?.packages?.any { result ->
-        state.selectedUserIds.any { result.users[it] == null || result.users[it] == PackageState.UNKNOWN }
+    val hasIncompleteResults = snapshot?.packages?.any { result ->
+        state.selectedUserIds.any { result.hasUnresolvedStatus(it) }
     } == true
     val summaryTitle = when {
         state.activity == CleanerActivity.CHANGING -> stringResource(R.string.changing)
@@ -238,9 +247,11 @@ private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) 
                         result.users[userId] == PackageState.DISABLED
                 }
             }
-            if (count == 0 && hasUnverified) stringResource(R.string.status_unknown)
+            if (count == 0 && hasIncompleteResults) stringResource(R.string.summary_scan_incomplete)
             else pluralStringResource(R.plurals.installed_components, count, count)
         }
+        state.connection == ShizukuStatus.READY && state.error != null ->
+            stringResource(R.string.scan_unavailable)
         else -> stringResource(
             when (state.connection) {
                 ShizukuStatus.MISSING -> R.string.shizuku_missing
@@ -258,8 +269,9 @@ private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) 
         state.connection == ShizukuStatus.STOPPED -> R.string.start_explanation
         state.connection == ShizukuStatus.PERMISSION_REQUIRED -> R.string.permission_explanation
         state.connection == ShizukuStatus.CONNECTING -> R.string.waiting_for_shizuku
-        snapshot == null && state.connection == ShizukuStatus.READY -> R.string.scan_ready_description
-        state.connection == ShizukuStatus.READY && hasUnverified -> R.string.summary_unverified
+        snapshot == null && state.connection == ShizukuStatus.READY && state.error == null ->
+            R.string.scan_ready_description
+        state.connection == ShizukuStatus.READY && hasIncompleteResults -> R.string.summary_scan_incomplete_description
         else -> null
     }
 
@@ -373,13 +385,13 @@ private fun CarrierGroup(
     onIntent: (CleanerIntent) -> Unit,
 ) {
     val entries = snapshot.packages.filter { carrier in it.entry.carriers }
-    val visible = entries.filter { result ->
-        result.systemPath != null || result.users.values.any {
-            it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
-        }
-    }
-    val unverified = entries.isEmpty() || entries.any { entry ->
-        state.selectedUserIds.any { entry.users[it] == null || entry.users[it] == PackageState.UNKNOWN }
+    val (visible, hidden) = entries.partition { it.hasVisibleRecord() }
+    val headerLabel = when {
+        state.selectedUserIds.isEmpty() && visible.isEmpty() -> R.string.scope_empty
+        state.selectedUserIds.isNotEmpty() && entries.isNotEmpty() && entries.all { result ->
+            state.selectedUserIds.all { result.users[it] == PackageState.NOT_FOUND }
+        } -> R.string.status_known_components_not_found
+        else -> null
     }
     val colors = MaterialTheme.colorScheme
     Surface(
@@ -401,24 +413,41 @@ private fun CarrierGroup(
                         modifier = Modifier.weight(1f).semantics { heading() },
                         style = MaterialTheme.typography.titleMediumEmphasized,
                     )
-                    if (visible.isEmpty()) {
+                    if (headerLabel != null) {
                         Text(
-                            stringResource(
-                                when {
-                                    state.selectedUserIds.isEmpty() -> R.string.scope_empty
-                                    unverified -> R.string.status_unknown
-                                    else -> R.string.status_not_found
-                                },
-                            ),
+                            stringResource(headerLabel),
                             style = MaterialTheme.typography.labelMedium,
                         )
                     }
                 }
+                PackageScanIssues(hidden, state.selectedUserIds)
                 visible.forEach { result ->
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     ComponentRow(result, snapshot, state, onIntent)
                 }
             }
+        }
+    }
+}
+
+/** Explains why packages without a visible record could not be checked. */
+@Composable
+private fun PackageScanIssues(packages: List<DetectedPackage>, userIds: Set<Int>) {
+    val packagesByIssue = packages.flatMap { result ->
+        userIds.filter { result.hasUnresolvedStatus(it) }
+            .map { result.installationStatusLabel(it) to result.entry.packageName }
+    }.groupBy({ it.first }, { it.second })
+    packagesByIssue.forEach { (label, packageNames) ->
+        Column(
+            Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(stringResource(label), style = MaterialTheme.typography.labelMedium)
+            Text(
+                packageNames.distinct().joinToString(separator = " · "),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -463,7 +492,7 @@ private fun ComponentRow(
     val packageName = result.entry.packageName
     val selectedSpaces = snapshot.users.filter { it.id in state.selectedUserIds }
     val statusLines = selectedSpaces.map { space ->
-        val status = stringResource((result.users[space.id] ?: PackageState.UNKNOWN).label())
+        val status = stringResource(result.installationStatusLabel(space.id))
         if (selectedSpaces.size == 1) status else {
             stringResource(R.string.status_in_space, space.displayName(), status)
         }
@@ -767,7 +796,7 @@ private fun DetailFields(result: DetectedPackage, users: List<AndroidUser>) {
     InfoField(R.string.details_carriers, names.joinToString().ifEmpty { stringResource(R.string.status_unknown) })
     Text(stringResource(R.string.details_installation), style = MaterialTheme.typography.titleSmall)
     users.forEach { user ->
-        val status = stringResource((result.users[user.id] ?: PackageState.UNKNOWN).label())
+        val status = stringResource(result.installationStatusLabel(user.id))
         Text(stringResource(R.string.status_in_space, user.displayName(), status), style = MaterialTheme.typography.bodyMedium)
     }
 }
@@ -850,13 +879,31 @@ internal fun Carrier.label(): Int = when (this) {
     Carrier.MOBILE -> R.string.carrier_mobile
 }
 
+/** Identifies components with enough package data to display an interactive row. */
+private fun DetectedPackage.hasVisibleRecord(): Boolean = systemPath != null || users.values.any {
+    it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
+}
+
+/** Indicates that the package state could not be confirmed in the given space. */
+private fun DetectedPackage.hasUnresolvedStatus(userId: Int): Boolean {
+    val state = users[userId]
+    return state == null || state == PackageState.UNKNOWN
+}
+
+/** Explains an unresolved installation state using the reason reported for that space. */
 @StringRes
-private fun PackageState.label(): Int = when (this) {
+private fun DetectedPackage.installationStatusLabel(userId: Int): Int = when (users[userId]) {
     PackageState.INSTALLED -> R.string.status_installed
     PackageState.DISABLED -> R.string.status_disabled
     PackageState.RESTORABLE -> R.string.status_restorable
     PackageState.NOT_FOUND -> R.string.status_not_found
-    PackageState.UNKNOWN -> R.string.status_unknown
+    PackageState.UNKNOWN, null -> when (scanIssues[userId]) {
+        PackageScanIssue.QUERY_FAILED -> R.string.scan_package_query_failed
+        PackageScanIssue.PERMISSION_DENIED -> R.string.scan_package_permission_denied
+        PackageScanIssue.UNRECOGNIZED_RESPONSE -> R.string.scan_package_response_invalid
+        PackageScanIssue.USER_STATE_MISSING -> R.string.scan_package_space_state_missing
+        null -> R.string.status_installation_recheck
+    }
 }
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"

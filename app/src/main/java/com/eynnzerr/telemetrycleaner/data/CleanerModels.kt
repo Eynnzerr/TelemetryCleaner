@@ -43,6 +43,9 @@ enum class PackageState {
     UNKNOWN,
 }
 
+/** Explains why the package manager could not confirm a scan result. */
+enum class PackageScanIssue { QUERY_FAILED, PERMISSION_DENIED, UNRECOGNIZED_RESPONSE, USER_STATE_MISSING }
+
 /** Groups requested permissions by their protection level on this device. */
 enum class PermissionProtection { DANGEROUS, PRIVILEGED, SIGNATURE, OTHER, UNKNOWN }
 
@@ -71,6 +74,7 @@ data class ComponentPermission(
  * @property users The observed installation state keyed by user ID.
  * @property canManage Whether the package identity and platform allow the screen to offer changes.
  * @property permissions Requested permissions, or null if declarations could not be read.
+ * @property scanIssues Reasons the scanner could not confirm the state, keyed by user ID.
  */
 data class DetectedPackage(
     val entry: PackageEntry,
@@ -80,6 +84,7 @@ data class DetectedPackage(
     val users: Map<Int, PackageState>,
     val canManage: Boolean,
     val permissions: List<ComponentPermission>? = null,
+    val scanIssues: Map<Int, PackageScanIssue> = emptyMap(),
 )
 
 /**
