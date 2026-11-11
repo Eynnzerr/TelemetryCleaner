@@ -14,7 +14,7 @@ defaults:
 
 jobs:
   release:
-    if: github.event.created
+    if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -30,8 +30,10 @@ jobs:
           java-version: '25'
           cache: gradle
 
-      - name: Install Android SDK
-        run: sdkmanager --install 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
 
       - name: Build signed release APK
         env:
