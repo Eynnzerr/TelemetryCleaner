@@ -37,9 +37,9 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 | 跨厂商 | 联通 | `com.mobiletools.systemhelper` | 已实测 |
 | OPPO / 一加 / realme | 电信 | `com.oppo.ctautoregist` | 已实测 |
 | OPPO / 一加 / realme | 移动 | `com.coloros.regservice` | 已实测 |
-| 小米 / Redmi / POCO | 电信 | `com.xiaomi.registration` | 未验证 |
-| 小米 / Redmi / POCO | 移动 | `com.miui.dmregservice` | 未验证 |
-| vivo | 移动 / 电信 | `com.vivo.devicereg` | 未验证 |
+| 小米 / Redmi / POCO | 电信 | `com.xiaomi.registration` | 已实测 |
+| 小米 / Redmi / POCO | 移动 | `com.miui.dmregservice` | 已实测 |
+| vivo | 移动 / 电信 | `com.vivo.devicereg` | 已实测 |
 | 华为及旧荣耀 | 电信（数据） | `com.huawei.android.UEInfoCheck` | 未验证 |
 | 华为及旧荣耀 | 电信（短信） | `com.huawei.android.AutoRegSms` | 未验证 |
 | 华为 | 移动 | `com.huawei.regservice` | 未验证 |
