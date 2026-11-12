@@ -153,7 +153,7 @@
     <string name="scan_package_space_state_missing">The system did not report installation status for this space</string>
     <string name="status_unknown">Unverified</string>
     <string name="status_in_space">%1$s · %2$s</string>
-    <string name="state_read_only">Changes unavailable on this device</string>
+    <string name="status_uninstall_not_restorable">%1$s | Cannot restore after uninstall</string>
     <string name="select_component">Select %s</string>
     <string name="view_details">Details</string>
     <string name="uninstall">Uninstall</string>
@@ -187,9 +187,9 @@
     <string name="details_select_spaces">Choose the spaces for manual checks and automatic cleanup.</string>
     <string name="confirm_uninstall">Uninstall components</string>
     <string name="confirm_restore">Restore components</string>
-    <string name="uninstall_description">This clears the selected components’ local data in these spaces. You can restore the components from the system later.</string>
+    <string name="uninstall_description">This uninstalls the components from the selected spaces and clears their local data.</string>
     <string name="uninstall_untested_warning">Uninstalling components from %1$s has not been tested. Their behavior after uninstall is uncertain. Review the risks carefully. If issues arise after uninstalling, you are responsible for the outcome.</string>
-    <string name="restore_description">This reinstalls the system copy in the selected spaces.</string>
+    <string name="restore_description">This reinstalls the existing APK in the selected spaces.</string>
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>
     <string name="operation_results">Operation results</string>

@@ -45,6 +45,16 @@ class CleanerRepository(context: Context) : Closeable {
     private val userManager = appContext.getSystemService(UserManager::class.java)
     private val mutableConnection = MutableStateFlow(ShizukuStatus.STOPPED)
 
+    /** The APK that app_process loads for the privileged uninstall fallback. */
+    private val fallbackApkPath: String? by lazy {
+        try {
+            appContext.packageManager.getApplicationInfo(appContext.packageName, 0).sourceDir
+        } catch (_: Exception) {
+            // The fallback is best-effort; an unreadable path must not mask the system error.
+            null
+        }
+    }
+
     /** Whether the app can use the Shizuku connection. */
     val connection: StateFlow<ShizukuStatus> = mutableConnection.asStateFlow()
 
@@ -104,7 +114,7 @@ class CleanerRepository(context: Context) : Closeable {
             packageMutex.withLock {
                 targets.distinct().map { target ->
                     ensureActive()
-                    changePackage(target, action)
+                    changePackage(target, action, requireVerifiedSystemIdentity = false)
                 }
             }
         }
@@ -184,10 +194,13 @@ class CleanerRepository(context: Context) : Closeable {
     private suspend fun changePackage(
         target: ChangeTarget,
         action: PackageAction,
+        requireVerifiedSystemIdentity: Boolean = true,
         canSubmit: suspend () -> Boolean = { true },
     ): ChangeOutcome = try {
         if (Shizuku.pingBinder()) {
-            PackageCommands.change(target, action, canSubmit)
+            PackageCommands.change(target, action, requireVerifiedSystemIdentity, canSubmit) { packageName, userId ->
+                fallbackApkPath?.let { PackageFallback.uninstall(it, packageName, userId) } == true
+            }
         } else {
             ChangeOutcome(target, false, "Shizuku 已断开。")
         }

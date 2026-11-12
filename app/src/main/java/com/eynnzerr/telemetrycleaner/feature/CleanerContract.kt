@@ -73,7 +73,12 @@ data class CleanerState(
     fun targetsFor(action: PackageAction, packageName: String? = null): List<ChangeTarget> {
         if (!readyForActions) return emptyList()
         val packageNames = if (packageName == null) selectedPackageNames else setOf(packageName)
-        return snapshot?.targetsFor(action, selectedUserIds, packageNames).orEmpty()
+        return snapshot?.targetsFor(
+            action,
+            selectedUserIds,
+            packageNames,
+            requireVerifiedSystemIdentity = false,
+        ).orEmpty()
     }
 
     /** Whether [packageName] can be selected for a batch action in any chosen space. */

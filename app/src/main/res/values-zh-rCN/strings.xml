@@ -151,7 +151,7 @@
     <string name="scan_package_space_state_missing">系统未返回该空间的安装状态</string>
     <string name="status_unknown">待核验</string>
     <string name="status_in_space">%1$s · %2$s</string>
-    <string name="state_read_only">此机型仅可检测</string>
+    <string name="status_uninstall_not_restorable">%1$s | 卸载不可恢复</string>
     <string name="select_component">选择 %s</string>
     <string name="view_details">详情</string>
     <string name="uninstall">卸载</string>
@@ -184,9 +184,9 @@
     <string name="details_select_spaces">手动检测和自动清理均使用所选空间。</string>
     <string name="confirm_uninstall">卸载组件</string>
     <string name="confirm_restore">恢复组件</string>
-    <string name="uninstall_description">将清除所选空间中的组件数据，之后仍可从系统恢复组件。</string>
+    <string name="uninstall_description">将卸载所选空间中的组件并清除组件数据。</string>
     <string name="uninstall_untested_warning">%1$s组件未做卸载测试，不保证卸载后行为。请谨慎评估，如卸载后出现异常，结果自负。</string>
-    <string name="restore_description">将使用设备保留的系统副本，在所选空间恢复组件。</string>
+    <string name="restore_description">将使用设备上已有的 APK，在所选空间恢复组件。</string>
     <string name="cancel">取消</string>
     <string name="done">完成</string>
     <string name="operation_results">操作结果</string>

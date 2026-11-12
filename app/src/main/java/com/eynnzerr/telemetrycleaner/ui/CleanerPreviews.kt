@@ -65,14 +65,20 @@ private fun samplePackage(
     ownerState: PackageState,
     cloneState: PackageState = ownerState,
     hasPackageRecord: Boolean = ownerState != PackageState.NOT_FOUND && ownerState != PackageState.UNKNOWN,
-    canManage: Boolean = hasPackageRecord,
+    hasVerifiedSystemIdentity: Boolean = hasPackageRecord,
+    hasSystemCopy: Boolean = true,
 ): DetectedPackage = DetectedPackage(
     entry = entry,
     versionName = "16.0.0".takeIf { hasPackageRecord },
     versionCode = 31L.takeIf { hasPackageRecord },
-    systemPath = "/product/priv-app/${entry.displayName}/${entry.displayName}.apk".takeIf { hasPackageRecord },
+    systemPath = if (!hasPackageRecord) null else if (hasSystemCopy) {
+        "/product/priv-app/${entry.displayName}/${entry.displayName}.apk"
+    } else {
+        "/data/app/${entry.packageName}/base.apk"
+    },
     users = mapOf(owner.id to ownerState, clone.id to cloneState),
-    canManage = canManage,
+    hasVerifiedSystemIdentity = hasVerifiedSystemIdentity,
+    hasSystemCopy = hasSystemCopy.takeIf { hasPackageRecord },
 )
 
 /** Creates a state whose scan belongs to the same user profile as the running app. */
@@ -142,9 +148,17 @@ internal class CleanerScreenPreviewProvider : PreviewParameterProvider<CleanerSt
                 .copy(scanIssues = mapOf(clone.id to PackageScanIssue.USER_STATE_MISSING)),
         ).copy(selectedUserIds = bothSpaces),
         "已停用" to scannedState(samplePackage(unicom, PackageState.DISABLED)),
-        "两家共用 · 仅查看" to scannedState(samplePackage(shared, PackageState.INSTALLED, canManage = false)),
-        "运营商归属待核验" to scannedState(
-            samplePackage(unassigned, PackageState.INSTALLED, canManage = false),
+        "系统组件 · 可恢复" to scannedState(
+            samplePackage(shared, PackageState.RESTORABLE, hasVerifiedSystemIdentity = false),
+        ),
+        "普通应用 · 卸载不可恢复" to scannedState(
+            samplePackage(
+                unassigned,
+                PackageState.INSTALLED,
+                PackageState.RESTORABLE,
+                hasVerifiedSystemIdentity = false,
+                hasSystemCopy = false,
+            ),
         ),
         "未选择空间" to scan.copy(selectedUserIds = emptySet()),
         "多个空间 · 批量操作" to scan.copy(

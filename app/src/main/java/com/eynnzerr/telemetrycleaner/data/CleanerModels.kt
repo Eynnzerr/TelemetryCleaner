@@ -72,7 +72,8 @@ data class ComponentPermission(
  * @property versionCode The version used to guard a mutation against a concurrent update.
  * @property systemPath The active APK code path, including a staged system update if applicable.
  * @property users The observed installation state keyed by user ID.
- * @property canManage Whether the package identity and platform allow the screen to offer changes.
+ * @property hasVerifiedSystemIdentity Whether Android reports a system package with an application-range ID.
+ * @property hasSystemCopy Whether the package flags indicate a system copy, or null if flags are unavailable.
  * @property permissions Requested permissions, or null if declarations could not be read.
  * @property scanIssues Reasons the scanner could not confirm the state, keyed by user ID.
  */
@@ -82,7 +83,8 @@ data class DetectedPackage(
     val versionCode: Long?,
     val systemPath: String?,
     val users: Map<Int, PackageState>,
-    val canManage: Boolean,
+    val hasVerifiedSystemIdentity: Boolean,
+    val hasSystemCopy: Boolean? = null,
     val permissions: List<ComponentPermission>? = null,
     val scanIssues: Map<Int, PackageScanIssue> = emptyMap(),
 )
@@ -99,13 +101,15 @@ data class ScanSnapshot(
     val users: List<AndroidUser>,
     val packages: List<DetectedPackage>,
 ) {
-    /** Resolves verified, actionable package and user pairs from this snapshot. */
+    /** Resolves actionable package and user pairs, checking system identity when required. */
     internal fun targetsFor(
         action: PackageAction,
         selectedUserIds: Set<Int>,
         packageNames: Set<String>? = null,
+        requireVerifiedSystemIdentity: Boolean = true,
     ): List<ChangeTarget> = packages
-        .filter { it.canManage && (packageNames == null || it.entry.packageName in packageNames) }
+        .filter { packageNames == null || it.entry.packageName in packageNames }
+        .filter { !requireVerifiedSystemIdentity || it.hasVerifiedSystemIdentity }
         .flatMap { detected ->
             selectedUserIds.filter { userId -> detected.users[userId].permits(action) }
                 .map { userId -> ChangeTarget(detected.entry.packageName, userId) }
@@ -116,7 +120,7 @@ data class ScanSnapshot(
 enum class PackageAction { UNINSTALL, RESTORE }
 
 /** Whether this observed package state is a valid starting point for the action. */
-private fun PackageState?.permits(action: PackageAction): Boolean = when (action) {
+internal fun PackageState?.permits(action: PackageAction): Boolean = when (action) {
     PackageAction.UNINSTALL -> this == PackageState.INSTALLED || this == PackageState.DISABLED
     PackageAction.RESTORE -> this == PackageState.RESTORABLE
 }

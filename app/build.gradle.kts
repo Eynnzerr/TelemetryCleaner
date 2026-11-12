@@ -51,6 +51,7 @@ android {
     buildTypes {
         release {
             signingConfig = releaseSigning
+            proguardFile("proguard-rules.pro")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
