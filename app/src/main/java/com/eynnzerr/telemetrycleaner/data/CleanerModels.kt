@@ -72,6 +72,7 @@ data class ComponentPermission(
  * @property hasSystemCopy Whether the package flags indicate a system copy, or null if flags are unavailable.
  * @property permissions Requested permissions, or null if declarations could not be read.
  * @property scanIssues Reasons the scanner could not confirm the state, keyed by user ID.
+ * @property userDisabledIds Spaces whose package is explicitly disabled by the user and can be re-enabled.
  */
 data class DetectedPackage(
     val entry: PackageEntry,
@@ -83,6 +84,7 @@ data class DetectedPackage(
     val hasSystemCopy: Boolean? = null,
     val permissions: List<ComponentPermission>? = null,
     val scanIssues: Map<Int, PackageScanIssue> = emptyMap(),
+    val userDisabledIds: Set<Int> = emptySet(),
 )
 
 /**
@@ -97,17 +99,26 @@ data class ScanSnapshot(
     val users: List<AndroidUser>,
     val packages: List<DetectedPackage>,
 ) {
-    /** Resolves actionable package and user pairs, checking system identity when required. */
+    /** Resolves actionable package and user pairs, with optional identity and uninstall-state checks. */
     internal fun targetsFor(
         action: PackageAction,
         selectedUserIds: Set<Int>,
         packageNames: Set<String>? = null,
         requireVerifiedSystemIdentity: Boolean = true,
+        includeDisabledForUninstall: Boolean = true,
     ): List<ChangeTarget> = packages
         .filter { packageNames == null || it.entry.packageName in packageNames }
         .filter { !requireVerifiedSystemIdentity || it.hasVerifiedSystemIdentity }
         .flatMap { detected ->
-            selectedUserIds.filter { userId -> detected.users[userId].permits(action) }
+            selectedUserIds.filter { userId ->
+                val state = detected.users[userId]
+                when (action) {
+                    PackageAction.UNINSTALL -> state.permits(action) &&
+                        (includeDisabledForUninstall || state != PackageState.DISABLED)
+                    PackageAction.RESTORE -> state.permits(action) ||
+                        (state == PackageState.DISABLED && userId in detected.userDisabledIds)
+                }
+            }
                 .map { userId -> ChangeTarget(detected.entry.packageName, userId) }
         }
 }
@@ -136,10 +147,12 @@ data class ChangeTarget(val packageName: String, val userId: Int)
  * @property success Whether Android reports the requested resulting state.
  * @property message The reason an operation failed or could not be confirmed.
  * @property denialLog Diagnostics from a manual uninstall rejected by the package service.
+ * @property disabledInstead Whether the fallback left the package installed and explicitly disabled.
  */
 data class ChangeOutcome(
     val target: ChangeTarget,
     val success: Boolean,
     val message: String?,
     val denialLog: String? = null,
+    val disabledInstead: Boolean = false,
 )

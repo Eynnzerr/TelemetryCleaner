@@ -98,7 +98,6 @@ import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
 import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
-import com.eynnzerr.telemetrycleaner.data.permits
 import com.eynnzerr.telemetrycleaner.feature.CleanerActivity
 import com.eynnzerr.telemetrycleaner.feature.CleanerError
 import com.eynnzerr.telemetrycleaner.feature.CleanerIntent
@@ -502,15 +501,15 @@ private fun ComponentRow(
     val packageName = result.entry.packageName
     val selectedSpaces = snapshot.users.filter { it.id in state.selectedUserIds }
     val losesApkOnUninstall = result.hasSystemCopy == false && result.users.none { (userId, status) ->
-        status == PackageState.UNKNOWN ||
-            (userId !in state.selectedUserIds && status.permits(PackageAction.UNINSTALL))
+        status == PackageState.UNKNOWN || status == PackageState.DISABLED ||
+            (userId !in state.selectedUserIds && status == PackageState.INSTALLED)
     }
     val statusLines = selectedSpaces.map { space ->
         val status = stringResource(result.installationStatusLabel(space.id))
         val spaceStatus = if (selectedSpaces.size == 1) status else {
             stringResource(R.string.status_in_space, space.displayName(), status)
         }
-        if (losesApkOnUninstall && result.users[space.id].permits(PackageAction.UNINSTALL)) {
+        if (losesApkOnUninstall && result.users[space.id] == PackageState.INSTALLED) {
             stringResource(R.string.status_uninstall_not_restorable, spaceStatus)
         } else {
             spaceStatus
@@ -711,7 +710,8 @@ internal fun CleanerSheetContent(
             }
             is CleanerPanel.Results -> {
                 SheetTitle(R.string.operation_results)
-                val denialLogs = panel.outcomes.mapNotNull { it.denialLog }
+                val denialLogs = panel.outcomes.filterNot { it.success || it.disabledInstead }
+                    .mapNotNull { it.denialLog }
                 val canCopyDenialLogs = panel.action == PackageAction.UNINSTALL && denialLogs.isNotEmpty()
                 if (canCopyDenialLogs) {
                     Text(
@@ -725,6 +725,7 @@ internal fun CleanerSheetContent(
                         outcome.target,
                         snapshot,
                         status = when {
+                            outcome.disabledInstead -> stringResource(R.string.disabled_instead_result)
                             outcome.success && panel.action == PackageAction.UNINSTALL -> {
                                 stringResource(R.string.uninstalled_result)
                             }
@@ -970,7 +971,9 @@ private fun DetectedPackage.hasUnresolvedStatus(userId: Int): Boolean {
 @StringRes
 private fun DetectedPackage.installationStatusLabel(userId: Int): Int = when (users[userId]) {
     PackageState.INSTALLED -> R.string.status_installed
-    PackageState.DISABLED -> R.string.status_disabled
+    PackageState.DISABLED -> {
+        if (userId in userDisabledIds) R.string.status_disabled else R.string.status_disabled_by_system
+    }
     PackageState.RESTORABLE -> R.string.status_restorable
     PackageState.NOT_FOUND -> R.string.status_not_found
     PackageState.UNKNOWN, null -> when (scanIssues[userId]) {

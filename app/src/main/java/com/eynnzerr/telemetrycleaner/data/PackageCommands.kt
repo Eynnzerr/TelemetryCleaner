@@ -12,6 +12,7 @@ import kotlinx.coroutines.ensureActive
  *
  * @property hasVerifiedSystemIdentity Whether the record identifies a system package with an application-range ID.
  * @property hasSystemCopy Whether the package flags indicate a system copy, or null if flags are unavailable.
+ * @property enabledSettings The raw Android enabled settings keyed by user ID.
  */
 internal data class PackageRecord(
     val versionName: String?,
@@ -20,6 +21,7 @@ internal data class PackageRecord(
     val hasVerifiedSystemIdentity: Boolean,
     val hasSystemCopy: Boolean?,
     val users: Map<Int, PackageState>,
+    val enabledSettings: Map<Int, Int>,
     /** The permission details read during an interactive scan. */
     val permissions: List<ComponentPermission>? = null,
 )
@@ -74,6 +76,10 @@ internal object PackageCommands {
                         permissions = reading.record.permissions,
                         scanIssues = states.filterValues { it == PackageState.UNKNOWN }
                             .mapValues { PackageScanIssue.USER_STATE_MISSING },
+                        userDisabledIds = reading.record.enabledSettings.filter { (id, enabled) ->
+                            states[id] == PackageState.DISABLED &&
+                                enabled == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                        }.keys,
                     )
                 }
                 PackageReading.Missing -> DetectedPackage(
@@ -174,6 +180,7 @@ internal object PackageCommands {
      *
      * [requireVerifiedSystemIdentity] enforces the package identity check for background cleanup.
      * [captureDenialLog] keeps the system response for rejected interactive uninstalls.
+     * [disableOnUninstallFailure] permits one ordinary package disable if an uninstall leaves the package installed.
      * [deleteThroughAppProcess] retries one uninstall directly through app_process when the
      * command layer fails. The original system error still describes a failed retry.
      */
@@ -182,6 +189,7 @@ internal object PackageCommands {
         action: PackageAction,
         requireVerifiedSystemIdentity: Boolean,
         captureDenialLog: Boolean,
+        disableOnUninstallFailure: Boolean,
         canSubmit: suspend () -> Boolean = { true },
         deleteThroughAppProcess: (String, Int) -> PackageFallbackResult,
     ): ChangeOutcome {
@@ -202,8 +210,12 @@ internal object PackageCommands {
         if (state == null || state == PackageState.UNKNOWN) {
             return ChangeOutcome(target, false, "无法确认该空间的组件状态。")
         }
-        if (matches(state, action)) return ChangeOutcome(target, true, null)
-        if (!state.permits(action)) {
+        val reenable = action == PackageAction.RESTORE && state == PackageState.DISABLED
+        if (reenable && record.enabledSettings[target.userId] != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
+            return ChangeOutcome(target, false, "系统停用了该组件，无法重新启用。")
+        }
+        if (!reenable && matches(state, action)) return ChangeOutcome(target, true, null)
+        if (!reenable && !state.permits(action)) {
             return ChangeOutcome(target, false, "设备上没有可用于恢复的组件副本。")
         }
 
@@ -214,21 +226,27 @@ internal object PackageCommands {
                 record.versionCode?.let { addAll(listOf("--versionCode", it.toString())) }
                 add(packageName)
             }
-            PackageAction.RESTORE ->
+            PackageAction.RESTORE -> if (reenable) {
+                listOf("enable", "--user", userId, packageName)
+            } else {
                 listOf("install-existing", "--user", userId, "--wait", packageName)
+            }
         }
         if (!canSubmit()) return ChangeOutcome(target, false, null)
         val startedAt = System.currentTimeMillis()
-        val attempt = try {
-            Result.success(PackageBinder.execute(command))
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Exception) {
-            Result.failure(failure)
-        }
+        val attempt = executeChange(command)
         // A rejected Binder reply can arrive after the service applied the command.
-        val post = readUserState(target)
-        if (matches(post, action)) return ChangeOutcome(target, true, null)
+        val afterRequest = read(packageName)
+        val post = readUserState(target, afterRequest)
+        val completed = if (reenable) {
+            post == PackageState.INSTALLED &&
+                afterRequest.enabledFor(target.userId) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        } else {
+            matches(post, action)
+        }
+        if (completed) {
+            return ChangeOutcome(target, true, null)
+        }
 
         val fallback = if (action == PackageAction.UNINSTALL && post != null && post != PackageState.UNKNOWN) {
             deleteThroughAppProcess(packageName, target.userId)
@@ -239,18 +257,58 @@ internal object PackageCommands {
             return ChangeOutcome(target, true, null)
         }
 
+        var disableAttempt: Result<PackageShellResult>? = null
+        var afterDisable: PackageState? = null
+        if (disableOnUninstallFailure && action == PackageAction.UNINSTALL) {
+            val current = read(packageName)
+            val currentState = readUserState(target, current)
+            if (matches(currentState, action)) return ChangeOutcome(target, true, null)
+            val enabled = current.enabledFor(target.userId)
+            if (currentState == PackageState.INSTALLED &&
+                (enabled == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT ||
+                    enabled == PackageManager.COMPONENT_ENABLED_STATE_ENABLED)
+            ) {
+                currentCoroutineContext().ensureActive()
+                disableAttempt = executeChange(listOf("disable-user", "--user", userId, packageName))
+                val updated = read(packageName)
+                afterDisable = readUserState(target, updated)
+                if (matches(afterDisable, action)) return ChangeOutcome(target, true, null)
+                val updatedEnabled = updated.enabledFor(target.userId)
+                if (afterDisable == PackageState.DISABLED &&
+                    updatedEnabled == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                ) {
+                    return ChangeOutcome(target, false, null, disabledInstead = true)
+                }
+            }
+        }
+
         val result = attempt.getOrNull()
         val failure = attempt.exceptionOrNull()
-        if (failure != null && failure !is SecurityException) throw failure
+        if (failure != null && failure !is SecurityException && disableAttempt == null) throw failure
         val rejected = failure is SecurityException ||
             (result != null && (result.exitCode > 0 || result.systemErrorLine() != null))
-        val denialLog = if (captureDenialLog && rejected) {
-            PackageDiagnostics.uninstallDenial(target, record, state, post, startedAt, attempt, fallback)
+        val denialLog = if (captureDenialLog && (rejected || disableAttempt != null)) {
+            PackageDiagnostics.uninstallDenial(
+                target, record, state, post, startedAt, attempt, fallback, disableAttempt, afterDisable,
+            )
         } else {
             null
         }
-        val message = if (result != null) failureReason(result, post) else "系统拒绝了对该空间的操作。"
+        val message = when {
+            result != null -> failureReason(result, post)
+            failure is SecurityException -> "系统拒绝了对该空间的操作。"
+            else -> "无法确认组件状态。请刷新后重试。"
+        }
         return ChangeOutcome(target, false, message, denialLog)
+    }
+
+    /** Keeps a package-service failure available for verification and diagnostics. */
+    private fun executeChange(command: List<String>): Result<PackageShellResult> = try {
+        Result.success(PackageBinder.execute(command))
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (failure: Exception) {
+        Result.failure(failure)
     }
 
     /** Waits until a deletion submitted through app_process becomes visible to package dumps. */
@@ -289,8 +347,15 @@ internal object PackageCommands {
                 it.startsWith("Permission Denial", ignoreCase = true)
         }
 
+    /** Returns the exact package manager enable setting observed for this user. */
+    private fun PackageReading.enabledFor(userId: Int): Int? =
+        (this as? PackageReading.Found)?.record?.enabledSettings?.get(userId)
+
     /** Resolves a target's installation state, including when its whole package record is gone. */
-    private fun readUserState(target: ChangeTarget): PackageState? = when (val reading = read(target.packageName)) {
+    private fun readUserState(
+        target: ChangeTarget,
+        reading: PackageReading = read(target.packageName),
+    ): PackageState? = when (reading) {
         is PackageReading.Found -> reading.record.users[target.userId]
         PackageReading.Missing -> PackageState.NOT_FOUND
         is PackageReading.Unavailable -> null
@@ -344,13 +409,18 @@ internal object PackageCommands {
             ?.substringAfter('=')?.toIntOrNull()
         val codePath = fields.firstOrNull { it.startsWith("codePath=") }
             ?.substringAfter('=')?.takeUnless { it.isBlank() || it == "null" }
+        val enabledSettings = mutableMapOf<Int, Int>()
         val users = lines.mapNotNull { line ->
             val match = userHeader.matchEntire(line) ?: return@mapNotNull null
             val id = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
             val data = match.groupValues[2]
+            val enabled = enabledFlag.find(data)?.groupValues?.get(1)?.toIntOrNull()
+            if (enabled != null) enabledSettings[id] = enabled
             val state = when (installedFlag.find(data)?.groupValues?.get(1)) {
-                "true" -> when (enabledFlag.find(data)?.groupValues?.get(1)) {
-                    "2", "3", "4" -> PackageState.DISABLED
+                "true" -> when (enabled) {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED -> PackageState.DISABLED
                     else -> PackageState.INSTALLED
                 }
                 "false" -> PackageState.NOT_FOUND
@@ -373,6 +443,7 @@ internal object PackageCommands {
             codePath = codePath,
             hasVerifiedSystemIdentity = isSystem && appId != null && appId >= 10_000,
             hasSystemCopy = isSystem.takeIf { flagFields.isNotEmpty() },
+            enabledSettings = enabledSettings,
             users = if (hasApk) {
                 users.mapValues { (_, state) -> if (state == PackageState.NOT_FOUND) PackageState.RESTORABLE else state }
             } else {

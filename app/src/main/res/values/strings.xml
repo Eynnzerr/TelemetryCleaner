@@ -9,6 +9,8 @@
     <string name="settings_group_cleanup">Cleanup</string>
     <string name="settings_group_appearance">Appearance</string>
     <string name="settings_group_about">About</string>
+    <string name="settings_disable_on_uninstall_failure">Try disabling if uninstall fails</string>
+    <string name="settings_disable_on_uninstall_failure_description">Applies to manual uninstalls. Disabling keeps the component’s app data.</string>
     <string name="settings_auto_cleanup_description">Check selected spaces about every %1$s</string>
     <string name="settings_auto_cleanup_interval">Cleanup interval</string>
     <string name="settings_auto_cleanup_interval_unit">Minutes</string>
@@ -133,6 +135,7 @@
     <string name="package_family_nubia">Nubia / REDMAGIC</string>
     <string name="status_installed">Installed</string>
     <string name="status_disabled">Disabled</string>
+    <string name="status_disabled_by_system">System-disabled</string>
     <string name="status_restorable">Uninstalled</string>
     <string name="status_not_found">Not found</string>
     <string name="status_known_components_not_found">No known components found</string>
@@ -179,7 +182,7 @@
     <string name="confirm_restore">Restore components</string>
     <string name="uninstall_description">This uninstalls the components from the selected spaces and clears their local data.</string>
     <string name="uninstall_untested_warning">Uninstalling components from %1$s has not been tested. Their behavior after uninstall is uncertain. Review the risks carefully. If issues arise after uninstalling, you are responsible for the outcome.</string>
-    <string name="restore_description">This reinstalls the existing APK in the selected spaces.</string>
+    <string name="restore_description">Disabled components will be re-enabled. Uninstalled components will be restored using the APK on this device.</string>
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>
     <string name="operation_results">Operation results</string>
@@ -187,6 +190,7 @@
     <string name="uninstall_denial_feedback_hint">The system blocked an uninstall. Use the copy icon below to include the logs in your feedback.</string>
     <string name="uninstall_denial_logs_copied">Uninstall denial logs copied</string>
     <string name="uninstalled_result">Uninstalled</string>
+    <string name="disabled_instead_result">Disabled after uninstall failed</string>
     <string name="restored_result">Restored</string>
     <string name="unverified_result">Could not verify the requested change</string>
     <string name="main_space">Main space</string>

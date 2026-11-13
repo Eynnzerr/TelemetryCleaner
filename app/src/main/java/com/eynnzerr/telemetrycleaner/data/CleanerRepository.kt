@@ -110,13 +110,22 @@ class CleanerRepository(context: Context) : Closeable {
         packageMutex.withLock { scanPackages(PackageDirectory.variants.keys, appContext.packageManager) }
     }
 
-    /** Applies the confirmed actions serially and reports each target independently. */
-    suspend fun change(targets: List<ChangeTarget>, action: PackageAction): List<ChangeOutcome> =
+    /** Applies the confirmed manual actions serially, optionally trying to disable retained packages. */
+    suspend fun change(
+        targets: List<ChangeTarget>,
+        action: PackageAction,
+        disableOnUninstallFailure: Boolean = true,
+    ): List<ChangeOutcome> =
         withContext(Dispatchers.IO) {
             packageMutex.withLock {
                 targets.distinct().map { target ->
                     ensureActive()
-                    val outcome = changePackage(target, action, requireVerifiedSystemIdentity = false)
+                    val outcome = changePackage(
+                        target,
+                        action,
+                        requireVerifiedSystemIdentity = false,
+                        disableOnUninstallFailure = disableOnUninstallFailure,
+                    )
                     val denialLog = outcome.denialLog
                     if (denialLog == null) outcome else outcome.copy(denialLog = denialContext(target) + denialLog)
                 }
@@ -199,6 +208,7 @@ class CleanerRepository(context: Context) : Closeable {
         target: ChangeTarget,
         action: PackageAction,
         requireVerifiedSystemIdentity: Boolean = true,
+        disableOnUninstallFailure: Boolean = false,
         canSubmit: suspend () -> Boolean = { true },
     ): ChangeOutcome = try {
         if (Shizuku.pingBinder()) {
@@ -207,6 +217,7 @@ class CleanerRepository(context: Context) : Closeable {
                 action,
                 requireVerifiedSystemIdentity,
                 captureDenialLog = !requireVerifiedSystemIdentity && action == PackageAction.UNINSTALL,
+                disableOnUninstallFailure = disableOnUninstallFailure,
                 canSubmit = canSubmit,
             ) { packageName, userId ->
                 fallbackApkPath?.let { PackageFallback.uninstall(it, packageName, userId) }

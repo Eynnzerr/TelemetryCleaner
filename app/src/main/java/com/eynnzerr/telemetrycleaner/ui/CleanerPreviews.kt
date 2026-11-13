@@ -78,6 +78,10 @@ private fun samplePackage(
         "/data/app/${entry.packageName}/base.apk"
     },
     users = mapOf(owner.id to ownerState, clone.id to cloneState),
+    userDisabledIds = buildSet {
+        if (ownerState == PackageState.DISABLED) add(owner.id)
+        if (cloneState == PackageState.DISABLED) add(clone.id)
+    },
     hasVerifiedSystemIdentity = hasVerifiedSystemIdentity,
     hasSystemCopy = hasSystemCopy.takeIf { hasPackageRecord },
 )
@@ -229,6 +233,14 @@ internal class CleanerSheetPreviewProvider : PreviewParameterProvider<CleanerSta
                         denialLog = "${telecomClone.packageName} (user ${telecomClone.userId})\n" +
                             "Failure [DELETE_FAILED_USER_RESTRICTED]",
                     ),
+                ),
+            ),
+        ),
+        "卸载结果 · 已停用" to scannedState(samplePackage(shared, PackageState.DISABLED)).copy(
+            panel = CleanerPanel.Results(
+                PackageAction.UNINSTALL,
+                listOf(
+                    ChangeOutcome(ChangeTarget(shared.packageName, owner.id), false, null, disabledInstead = true),
                 ),
             ),
         ),
@@ -409,6 +421,8 @@ private fun SettingsScreenPreview(
             autoCleanupIntervalMinutes = intervalMinutes,
             onAutoCleanupChange = {},
             onAutoCleanupIntervalChange = {},
+            disableOnUninstallFailure = true,
+            onDisableOnUninstallFailureChange = {},
             onToggleSpace = {},
             onOpenAutoCleanupHistory = {},
             onOpenPackageDirectory = {},

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
 import com.eynnzerr.telemetrycleaner.data.CleanerRepository
 import com.eynnzerr.telemetrycleaner.data.CleanerSettings
+import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
 import com.eynnzerr.telemetrycleaner.data.UserListScanException
@@ -107,7 +108,9 @@ internal class CleanerViewModel(
     private suspend fun change(effect: CleanerEffect.Change) {
         val (action, targets) = effect.confirmation
         val message = try {
-            val outcomes = repository.change(targets, action)
+            val disableOnUninstallFailure = action == PackageAction.UNINSTALL &&
+                settings.readPreferences().disableOnUninstallFailure
+            val outcomes = repository.change(targets, action, disableOnUninstallFailure)
             CleanerMessage.ChangeFinished(effect.id, action, outcomes, requestFailed = false)
         } catch (_: Exception) {
             currentCoroutineContext().ensureActive()

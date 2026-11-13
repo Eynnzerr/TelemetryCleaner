@@ -142,6 +142,8 @@ class MainActivity : ComponentActivity() {
                                         ?: DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES,
                                     onAutoCleanupChange = ::setAutoCleanupEnabled,
                                     onAutoCleanupIntervalChange = ::setAutoCleanupInterval,
+                                    disableOnUninstallFailure = savedPreferences?.disableOnUninstallFailure,
+                                    onDisableOnUninstallFailureChange = ::setDisableOnUninstallFailure,
                                     onToggleSpace = { cleanerViewModel.dispatch(CleanerIntent.ToggleSpace(it)) },
                                     onOpenAutoCleanupHistory = {
                                         if (backStack.last() == Destination.SETTINGS) {
@@ -212,6 +214,15 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         lifecycleScope.launch { AutoCleanupService.startIfEnabled(this@MainActivity, settings) }
         cleanerViewModel.dispatch(CleanerIntent.Refresh)
+    }
+
+    /** Saves whether a failed manual uninstall can fall back to disabling the package. */
+    private fun setDisableOnUninstallFailure(enabled: Boolean) {
+        lifecycleScope.launch {
+            if (!settings.setDisableOnUninstallFailure(enabled)) {
+                Toast.makeText(this@MainActivity, R.string.settings_save_failed, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     /** Saves the interval used for subsequent automatic cleanup checks. */

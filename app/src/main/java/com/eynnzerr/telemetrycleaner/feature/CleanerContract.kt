@@ -78,6 +78,7 @@ data class CleanerState(
             selectedUserIds,
             packageNames,
             requireVerifiedSystemIdentity = false,
+            includeDisabledForUninstall = false,
         ).orEmpty()
     }
 

@@ -19,19 +19,15 @@ internal object PackageDiagnostics {
         startedAt: Long,
         attempt: Result<PackageShellResult>,
         fallback: PackageFallbackResult?,
+        disableAttempt: Result<PackageShellResult>?,
+        afterDisable: PackageState?,
     ): String = buildString {
         appendLine("Time: ${Instant.ofEpochMilli(startedAt)}")
         appendLine("Package: ${target.packageName}, user: ${target.userId}")
         appendLine("Package version: ${record.versionName ?: "unknown"} (${record.versionCode ?: "unknown"})")
         appendLine("System package: ${record.hasSystemCopy ?: "unknown"}")
         appendLine("State before request: $before; after primary request: ${after ?: "unknown"}")
-        val result = attempt.getOrNull()
-        if (result != null) {
-            appendLine("Package service exit code: ${result.exitCode}")
-            appendLine(result.output.trim().take(4_000).ifBlank { "No package service output" })
-        } else {
-            appendLine("Package service exception: ${attempt.exceptionOrNull()}")
-        }
+        appendAttempt("Package service", attempt)
         if (fallback == null) {
             appendLine("Helper: not run")
         } else {
@@ -39,8 +35,23 @@ internal object PackageDiagnostics {
             appendLine("Helper: $status")
             appendLine(fallback.detail)
         }
+        if (disableAttempt != null) {
+            appendAttempt("Disable fallback", disableAttempt)
+            appendLine("State after disable request: ${afterDisable ?: "unknown"}")
+        }
         appendLine("Related system log:")
         append(readSystemLog(target.packageName, startedAt))
+    }
+
+    /** Writes the service output or exception from a single package command. */
+    private fun StringBuilder.appendAttempt(label: String, attempt: Result<PackageShellResult>) {
+        val result = attempt.getOrNull()
+        if (result != null) {
+            appendLine("$label exit code: ${result.exitCode}")
+            appendLine(result.output.trim().take(4_000).ifBlank { "No package service output" })
+        } else {
+            appendLine("$label exception: ${attempt.exceptionOrNull()}")
+        }
     }
 
     /** Reads bounded system-UID messages matching this package or the uninstall restriction. */

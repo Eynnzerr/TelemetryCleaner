@@ -9,6 +9,8 @@
     <string name="settings_group_cleanup">清理</string>
     <string name="settings_group_appearance">外观</string>
     <string name="settings_group_about">关于</string>
+    <string name="settings_disable_on_uninstall_failure">卸载失败时尝试冻结</string>
+    <string name="settings_disable_on_uninstall_failure_description">停用组件但保留数据</string>
     <string name="settings_auto_cleanup_description">约每 %1$s复查所选空间</string>
     <string name="settings_auto_cleanup_interval">清理周期</string>
     <string name="settings_auto_cleanup_interval_unit">分钟</string>
@@ -124,13 +126,14 @@
     <string name="package_family_cross_vendor">跨厂商</string>
     <string name="package_family_color_os">OPPO / 一加 / realme</string>
     <string name="package_family_xiaomi">小米 / Redmi / POCO</string>
-    <string name="package_family_vivo">vivo</string>
+    <string name="package_family_vivo">vivo / iQOO</string>
     <string name="package_family_huawei">华为</string>
     <string name="package_family_honor">荣耀</string>
     <string name="package_family_flyme">魅族 / Flyme</string>
     <string name="package_family_nubia">努比亚 / 红魔</string>
     <string name="status_installed">已安装</string>
-    <string name="status_disabled">已停用</string>
+    <string name="status_disabled">已冻结</string>
+    <string name="status_disabled_by_system">系统停用</string>
     <string name="status_restorable">已卸载</string>
     <string name="status_not_found">未检出</string>
     <string name="status_known_components_not_found">未检出已知组件</string>
@@ -154,7 +157,7 @@
     <string name="details_title">组件详情</string>
     <string name="details_overview_tab">概览</string>
     <string name="details_permissions_tab">权限</string>
-    <string name="details_permissions_explanation">申请项和各空间的授权状态来自 Android 包管理器。判断组件是否读取或上传数据，需要核验实际行为。</string>
+    <string name="details_permissions_explanation">授权申请状态来自 Android 包管理器。</string>
     <string name="details_permissions_empty">Android 未记录该组件申请的权限。</string>
     <string name="details_permissions_unavailable">暂时无法读取 Android 记录的权限列表。</string>
     <string name="details_permission_space">授权状态 · %1$s</string>
@@ -176,7 +179,7 @@
     <string name="confirm_restore">恢复组件</string>
     <string name="uninstall_description">将卸载所选空间中的组件并清除组件数据。</string>
     <string name="uninstall_untested_warning">作者暂未对%1$s组件做卸载测试，不保证卸载后行为。请谨慎评估再决定是否卸载。</string>
-    <string name="restore_description">将使用设备上已有的 APK，在所选空间恢复组件。</string>
+    <string name="restore_description">已停用的组件将重新启用，已卸载的组件将用设备上保留的 APK 恢复。</string>
     <string name="cancel">取消</string>
     <string name="done">完成</string>
     <string name="operation_results">操作结果</string>
@@ -184,6 +187,7 @@
     <string name="uninstall_denial_feedback_hint">卸载被系统拒绝，可点下方图标复制日志并反馈。</string>
     <string name="uninstall_denial_logs_copied">已复制卸载拒绝日志</string>
     <string name="uninstalled_result">卸载成功</string>
+    <string name="disabled_instead_result">未卸载，已停用</string>
     <string name="restored_result">恢复成功</string>
     <string name="unverified_result">未能确认请求的变更</string>
     <string name="main_space">主空间</string>

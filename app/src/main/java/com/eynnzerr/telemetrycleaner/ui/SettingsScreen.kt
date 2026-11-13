@@ -84,6 +84,8 @@ internal fun SettingsScreen(
     autoCleanupIntervalMinutes: Int,
     onAutoCleanupChange: (Boolean) -> Unit,
     onAutoCleanupIntervalChange: (Int) -> Unit,
+    disableOnUninstallFailure: Boolean?,
+    onDisableOnUninstallFailureChange: (Boolean) -> Unit,
     onToggleSpace: (Int) -> Unit,
     onOpenAutoCleanupHistory: () -> Unit,
     onOpenPackageDirectory: () -> Unit,
@@ -124,6 +126,10 @@ internal fun SettingsScreen(
             ) {
                 ScopeSettings(state, onToggleSpace)
                 SettingsGroup(stringResource(R.string.settings_group_cleanup)) {
+                    DisableOnUninstallFailureSetting(
+                        enabled = disableOnUninstallFailure,
+                        onEnabledChange = onDisableOnUninstallFailureChange,
+                    )
                     AutoCleanupSettings(
                         enabled = autoCleanupEnabled,
                         status = autoCleanupStatus,
@@ -393,6 +399,23 @@ private fun SpaceRow(
             )
         },
         trailingContent = { Checkbox(checked = checked, enabled = enabled, onCheckedChange = null) },
+    )
+}
+
+/** Lets the user control the disable fallback for manual uninstall. */
+@Composable
+private fun DisableOnUninstallFailureSetting(enabled: Boolean?, onEnabledChange: (Boolean) -> Unit) {
+    SettingsItem(
+        icon = R.drawable.ic_settings_check,
+        title = stringResource(R.string.settings_disable_on_uninstall_failure),
+        modifier = Modifier.toggleable(
+            value = enabled == true,
+            enabled = enabled != null,
+            role = Role.Switch,
+            onValueChange = onEnabledChange,
+        ),
+        supportingContent = { Text(stringResource(R.string.settings_disable_on_uninstall_failure_description)) },
+        trailingContent = { Switch(checked = enabled == true, enabled = enabled != null, onCheckedChange = null) },
     )
 }
 
