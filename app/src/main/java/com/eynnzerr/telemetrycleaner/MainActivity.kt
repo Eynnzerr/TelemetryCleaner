@@ -12,6 +12,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -19,10 +27,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
+import androidx.navigationevent.NavigationEvent
 import com.eynnzerr.telemetrycleaner.data.AutoCleanupHistory
 import com.eynnzerr.telemetrycleaner.data.AutoCleanupHistoryStore
 import com.eynnzerr.telemetrycleaner.data.AutoCleanupStatus
@@ -52,6 +62,15 @@ private const val GITHUB_PROJECT_URL = "https://github.com/$GITHUB_REPOSITORY"
 
 /** Saveable route keys for the cleaner and its settings destinations. */
 private enum class Destination { CLEANER, SETTINGS, AUTO_CLEANUP_HISTORY, PACKAGE_DIRECTORY }
+
+/** Slides both pages in the same direction using a shared timing curve. */
+private fun AnimatedContentTransitionScope<*>.pageSlide(
+    direction: SlideDirection,
+    easing: Easing = FastOutSlowInEasing,
+): ContentTransform {
+    val animation = tween<IntOffset>(durationMillis = 280, easing = easing)
+    return slideIntoContainer(direction, animation) togetherWith slideOutOfContainer(direction, animation)
+}
 
 /** Hosts the carrier telemetry screen and reconnects it after external setup. */
 class MainActivity : ComponentActivity() {
@@ -87,6 +106,16 @@ class MainActivity : ComponentActivity() {
                 NavDisplay(
                     backStack = backStack,
                     onBack = goBack,
+                    transitionSpec = { pageSlide(SlideDirection.Left) },
+                    popTransitionSpec = { pageSlide(SlideDirection.Right) },
+                    predictivePopTransitionSpec = { swipeEdge ->
+                        val direction = if (swipeEdge == NavigationEvent.EDGE_RIGHT) {
+                            SlideDirection.Left
+                        } else {
+                            SlideDirection.Right
+                        }
+                        pageSlide(direction, easing = LinearEasing)
+                    },
                     entryProvider = { destination ->
                         when (destination) {
                             Destination.CLEANER -> NavEntry(destination) {
