@@ -139,9 +139,11 @@ data class ChangeTarget(val packageName: String, val userId: Int)
  * @property target The exact package and user requested by the caller.
  * @property success Whether Android reports the requested resulting state.
  * @property message The reason an operation failed or could not be confirmed.
+ * @property denialLog Diagnostics from a manual uninstall rejected by the package service.
  */
 data class ChangeOutcome(
     val target: ChangeTarget,
     val success: Boolean,
     val message: String?,
+    val denialLog: String? = null,
 )

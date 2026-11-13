@@ -173,6 +173,7 @@ internal object PackageCommands {
      * Checks [canSubmit] before changing one user and verifies the resulting package state.
      *
      * [requireVerifiedSystemIdentity] enforces the package identity check for background cleanup.
+     * [captureDenialLog] keeps the system response for rejected interactive uninstalls.
      * [deleteThroughAppProcess] retries one uninstall directly through app_process when the
      * command layer fails. The original system error still describes a failed retry.
      */
@@ -180,8 +181,9 @@ internal object PackageCommands {
         target: ChangeTarget,
         action: PackageAction,
         requireVerifiedSystemIdentity: Boolean,
+        captureDenialLog: Boolean,
         canSubmit: suspend () -> Boolean = { true },
-        deleteThroughAppProcess: (String, Int) -> Boolean = { _, _ -> false },
+        deleteThroughAppProcess: (String, Int) -> PackageFallbackResult,
     ): ChangeOutcome {
         val packageName = target.packageName
         if (packageName !in PackageDirectory.variants) {
@@ -216,43 +218,39 @@ internal object PackageCommands {
                 listOf("install-existing", "--user", userId, "--wait", packageName)
         }
         if (!canSubmit()) return ChangeOutcome(target, false, null)
-        val result = try {
-            PackageBinder.execute(command)
+        val startedAt = System.currentTimeMillis()
+        val attempt = try {
+            Result.success(PackageBinder.execute(command))
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
-            // A rejected Binder reply can arrive after the service applied the command.
-            val post = readUserState(target)
-            if (matches(post, action)) return ChangeOutcome(target, true, null)
-            if (post != null && post != PackageState.UNKNOWN &&
-                retryUninstall(target, action, deleteThroughAppProcess)
-            ) {
-                return ChangeOutcome(target, true, null)
-            }
-            throw failure
+            Result.failure(failure)
         }
+        // A rejected Binder reply can arrive after the service applied the command.
         val post = readUserState(target)
         if (matches(post, action)) return ChangeOutcome(target, true, null)
 
-        // ROMs can reject system package removal at the command layer. Retry once through the
-        // hidden package manager interface, then keep showing the original system error.
-        if (post != null && post != PackageState.UNKNOWN &&
-            retryUninstall(target, action, deleteThroughAppProcess)
-        ) {
+        val fallback = if (action == PackageAction.UNINSTALL && post != null && post != PackageState.UNKNOWN) {
+            deleteThroughAppProcess(packageName, target.userId)
+        } else {
+            null
+        }
+        if (fallback?.submitted == true && awaitUninstall(target)) {
             return ChangeOutcome(target, true, null)
         }
-        return ChangeOutcome(target, false, failureReason(result, post))
-    }
 
-    /** Retries an uninstall through app_process and waits for the package dump to reflect it. */
-    private suspend fun retryUninstall(
-        target: ChangeTarget,
-        action: PackageAction,
-        deleteThroughAppProcess: (String, Int) -> Boolean,
-    ): Boolean {
-        if (action != PackageAction.UNINSTALL) return false
-        if (!deleteThroughAppProcess(target.packageName, target.userId)) return false
-        return awaitUninstall(target)
+        val result = attempt.getOrNull()
+        val failure = attempt.exceptionOrNull()
+        if (failure != null && failure !is SecurityException) throw failure
+        val rejected = failure is SecurityException ||
+            (result != null && (result.exitCode > 0 || result.systemErrorLine() != null))
+        val denialLog = if (captureDenialLog && rejected) {
+            PackageDiagnostics.uninstallDenial(target, record, state, post, startedAt, attempt, fallback)
+        } else {
+            null
+        }
+        val message = if (result != null) failureReason(result, post) else "系统拒绝了对该空间的操作。"
+        return ChangeOutcome(target, false, message, denialLog)
     }
 
     /** Waits until a deletion submitted through app_process becomes visible to package dumps. */
@@ -271,19 +269,25 @@ internal object PackageCommands {
         if (state == null || state == PackageState.UNKNOWN) {
             return "无法确认操作后的状态。请刷新后再试。"
         }
-        val systemError = result.output.lineSequence()
-            .map(String::trim)
-            .firstOrNull {
-                it.startsWith("Failure", ignoreCase = true) ||
-                    it.startsWith("Error", ignoreCase = true) ||
-                    it.startsWith("SecurityException", ignoreCase = true)
-            }?.take(160)
+        val systemError = result.systemErrorLine()?.take(160)
         return when {
             result.exitCode != 0 -> systemError ?: "系统拒绝了此操作。"
             systemError != null -> systemError
             else -> "系统返回后，组件状态仍未改变。"
         }
     }
+
+    /** Finds an explicit error reported by the package command. */
+    private fun PackageShellResult.systemErrorLine(): String? = output.lineSequence()
+        .map(String::trim)
+        .firstOrNull {
+            it.startsWith("Failure", ignoreCase = true) ||
+                it.startsWith("Error", ignoreCase = true) ||
+                it.startsWith("SecurityException", ignoreCase = true) ||
+            it.startsWith("java.lang.SecurityException", ignoreCase = true) ||
+            it.startsWith("DELETE_FAILED_", ignoreCase = true) ||
+                it.startsWith("Permission Denial", ignoreCase = true)
+        }
 
     /** Resolves a target's installation state, including when its whole package record is gone. */
     private fun readUserState(target: ChangeTarget): PackageState? = when (val reading = read(target.packageName)) {

@@ -193,6 +193,9 @@
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>
     <string name="operation_results">Operation results</string>
+    <string name="copy_uninstall_denial_logs">Copy uninstall denial logs</string>
+    <string name="uninstall_denial_feedback_hint">The system blocked an uninstall. Use the copy icon below to include the logs in your feedback.</string>
+    <string name="uninstall_denial_logs_copied">Uninstall denial logs copied</string>
     <string name="uninstalled_result">Uninstalled</string>
     <string name="restored_result">Restored</string>
     <string name="unverified_result">Could not verify the requested change</string>

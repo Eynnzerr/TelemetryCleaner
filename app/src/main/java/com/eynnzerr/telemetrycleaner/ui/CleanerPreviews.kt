@@ -215,11 +215,20 @@ internal class CleanerSheetPreviewProvider : PreviewParameterProvider<CleanerSta
         "确认恢复" to scan.copy(
             panel = CleanerPanel.Confirmation(PackageAction.RESTORE, listOf(unicomOwner)),
         ),
-        "卸载结果 · 部分失败" to afterPartialUninstall.copy(
+        "卸载结果 · 部分拒绝" to afterPartialUninstall.copy(
             selectedUserIds = bothSpaces,
             panel = CleanerPanel.Results(
                 PackageAction.UNINSTALL,
-                listOf(ChangeOutcome(telecomOwner, true, null), ChangeOutcome(telecomClone, false, null)),
+                listOf(
+                    ChangeOutcome(telecomOwner, true, null),
+                    ChangeOutcome(
+                        telecomClone,
+                        false,
+                        "Failure [DELETE_FAILED_USER_RESTRICTED]",
+                        denialLog = "${telecomClone.packageName} (user ${telecomClone.userId})\n" +
+                            "Failure [DELETE_FAILED_USER_RESTRICTED]",
+                    ),
+                ),
             ),
         ),
         "恢复成功" to afterRestore.copy(

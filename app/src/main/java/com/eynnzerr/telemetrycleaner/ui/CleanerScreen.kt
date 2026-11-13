@@ -2,9 +2,12 @@
 
 package com.eynnzerr.telemetrycleaner.ui
 
+import android.content.ClipData
 import android.content.Intent
 import android.icu.text.ListFormatter
 import android.net.Uri
+import android.os.Build
+import android.widget.Toast
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
@@ -15,6 +18,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,6 +30,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
@@ -47,6 +52,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.SplitButtonDefaults
+import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -67,6 +74,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -702,6 +711,15 @@ internal fun CleanerSheetContent(
             }
             is CleanerPanel.Results -> {
                 SheetTitle(R.string.operation_results)
+                val denialLogs = panel.outcomes.mapNotNull { it.denialLog }
+                val canCopyDenialLogs = panel.action == PackageAction.UNINSTALL && denialLogs.isNotEmpty()
+                if (canCopyDenialLogs) {
+                    Text(
+                        stringResource(R.string.uninstall_denial_feedback_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 panel.outcomes.forEach { outcome ->
                     TargetRow(
                         outcome.target,
@@ -715,9 +733,65 @@ internal fun CleanerSheetContent(
                         },
                     )
                 }
-                ExpressiveButton(R.string.done, Modifier.fillMaxWidth(), onClick = dismiss)
+                if (canCopyDenialLogs) {
+                    UninstallResultActions(denialLogs.joinToString("\n\n"), dismiss)
+                } else {
+                    ExpressiveButton(R.string.done, Modifier.fillMaxWidth(), onClick = dismiss)
+                }
             }
         }
+    }
+}
+
+/** Lets the user dismiss the result sheet or copy the batch's uninstall denial logs. */
+@Composable
+private fun UninstallResultActions(denialLogs: String, onDone: () -> Unit) {
+    val clipboard = LocalClipboard.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val copyLabel = stringResource(R.string.copy_uninstall_denial_logs)
+    val buttonHeight = SplitButtonDefaults.MediumContainerHeight
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val leadingWidth = maxWidth - buttonHeight - SplitButtonDefaults.Spacing
+        SplitButtonLayout(
+            leadingButton = {
+                SplitButtonDefaults.LeadingButton(
+                    onClick = onDone,
+                    modifier = Modifier
+                        .width(leadingWidth)
+                        .heightIn(min = buttonHeight),
+                    shapes = SplitButtonDefaults.leadingButtonShapesFor(buttonHeight),
+                    contentPadding = SplitButtonDefaults.leadingButtonContentPaddingFor(buttonHeight),
+                ) {
+                    Text(
+                        stringResource(android.R.string.ok),
+                        style = MaterialTheme.typography.labelLargeEmphasized,
+                    )
+                }
+            },
+            trailingButton = {
+                SplitButtonDefaults.TrailingButton(
+                    onClick = {
+                        scope.launch {
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(copyLabel, denialLogs)))
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                                Toast.makeText(context, R.string.uninstall_denial_logs_copied, Toast.LENGTH_SHORT)
+                                    .show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.size(buttonHeight),
+                    shapes = SplitButtonDefaults.trailingButtonShapesFor(buttonHeight),
+                    contentPadding = SplitButtonDefaults.trailingButtonContentPaddingFor(buttonHeight),
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_copy),
+                        contentDescription = copyLabel,
+                        modifier = Modifier.size(SplitButtonDefaults.MediumTrailingButtonIconSize),
+                    )
+                }
+            },
+        )
     }
 }
 

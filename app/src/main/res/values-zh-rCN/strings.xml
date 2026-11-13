@@ -190,6 +190,9 @@
     <string name="cancel">取消</string>
     <string name="done">完成</string>
     <string name="operation_results">操作结果</string>
+    <string name="copy_uninstall_denial_logs">复制卸载拒绝日志</string>
+    <string name="uninstall_denial_feedback_hint">卸载被系统拒绝，可点下方图标复制日志并反馈。</string>
+    <string name="uninstall_denial_logs_copied">已复制卸载拒绝日志</string>
     <string name="uninstalled_result">卸载成功</string>
     <string name="restored_result">恢复成功</string>
     <string name="unverified_result">未能确认请求的变更</string>

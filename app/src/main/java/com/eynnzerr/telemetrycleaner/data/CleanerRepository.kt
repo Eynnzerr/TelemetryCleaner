@@ -2,10 +2,12 @@ package com.eynnzerr.telemetrycleaner.data
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Process
 import android.os.UserHandle
 import android.os.UserManager
 import androidx.annotation.MainThread
+import com.eynnzerr.telemetrycleaner.BuildConfig
 import java.io.Closeable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -114,7 +116,9 @@ class CleanerRepository(context: Context) : Closeable {
             packageMutex.withLock {
                 targets.distinct().map { target ->
                     ensureActive()
-                    changePackage(target, action, requireVerifiedSystemIdentity = false)
+                    val outcome = changePackage(target, action, requireVerifiedSystemIdentity = false)
+                    val denialLog = outcome.denialLog
+                    if (denialLog == null) outcome else outcome.copy(denialLog = denialContext(target) + denialLog)
                 }
             }
         }
@@ -198,8 +202,15 @@ class CleanerRepository(context: Context) : Closeable {
         canSubmit: suspend () -> Boolean = { true },
     ): ChangeOutcome = try {
         if (Shizuku.pingBinder()) {
-            PackageCommands.change(target, action, requireVerifiedSystemIdentity, canSubmit) { packageName, userId ->
-                fallbackApkPath?.let { PackageFallback.uninstall(it, packageName, userId) } == true
+            PackageCommands.change(
+                target,
+                action,
+                requireVerifiedSystemIdentity,
+                captureDenialLog = !requireVerifiedSystemIdentity && action == PackageAction.UNINSTALL,
+                canSubmit = canSubmit,
+            ) { packageName, userId ->
+                fallbackApkPath?.let { PackageFallback.uninstall(it, packageName, userId) }
+                    ?: PackageFallbackResult(false, "Helper APK unavailable")
             }
         } else {
             ChangeOutcome(target, false, "Shizuku 已断开。")
@@ -210,6 +221,20 @@ class CleanerRepository(context: Context) : Closeable {
         throw cancellation
     } catch (_: Exception) {
         ChangeOutcome(target, false, "无法确认组件状态。请刷新后重试。")
+    }
+
+    /** Adds the device, caller and effective restriction needed to interpret a denial. */
+    private fun denialContext(target: ChangeTarget): String = buildString {
+        val handle = UserHandle.getUserHandleForUid(target.userId * PER_USER_RANGE)
+        val noUninstallApps = runCatching {
+            userManager?.getUserRestrictions(handle)?.getBoolean(UserManager.DISALLOW_UNINSTALL_APPS)
+        }.getOrNull()
+        val shizukuUid = runCatching { Shizuku.getUid().takeIf { it >= 0 } }.getOrNull()
+        appendLine("TelemetryCleaner ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}")
+        appendLine("Build: ${Build.DISPLAY} (${Build.FINGERPRINT})")
+        appendLine("Shizuku UID: ${shizukuUid ?: "unknown"}")
+        appendLine("Effective no_uninstall_apps for user ${target.userId}: ${noUninstallApps ?: "unknown"}")
     }
 
     /** Unregisters listeners when the screen store is cleared. */
