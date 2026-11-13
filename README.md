@@ -49,7 +49,7 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 | 魅族 / Flyme | 移动 | `com.meizu.regservice` | 未验证 |
 | 初代红魔 | 电信 | `cn.nubia.register` | 未验证 |
 
-本人只验证了 SystemHelper 和 OPPO 组件的卸载。其他厂商因缺少设备暂未验证，如决定卸载，请自行承担风险。
+本人只验证了 SystemHelper 和 OPPO 组件的卸载，小米、华为由网友验证实测。其他厂商因缺少设备暂未验证，如决定卸载，请自行承担风险。**如在 B 站评论区已有反馈：vivo 卸载 Device Management 后通话录音功能失效。**
 
 欢迎在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 反馈某厂商某模块卸载后使用正常，也欢迎补充组件。附上机型、系统版本、包名和实际结果，便于复核。
 
@@ -57,4 +57,4 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 
 - [ ] 努比亚、国行三星、魅族运营商遥测组件包名收集
 - [ ] 扩充更多组件检测（包括厂商自己的敏感数据收集组件）作为可选项
-- [ ] 部分 vivo 系不支持卸载 SystemHelper 外的组件，疑似厂商已经给 AOSP 漏洞堵死，待确认
+- [x] 部分 vivo 系不支持卸载 SystemHelper 外的组件。暂提供冻结策略作为兜底
