@@ -39,10 +39,10 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 | OPPO / 一加 / realme | 移动 | `com.coloros.regservice` | 已实测 |
 | 小米 / Redmi / POCO | 电信 | `com.xiaomi.registration` | 已实测 |
 | 小米 / Redmi / POCO | 移动 | `com.miui.dmregservice` | 已实测 |
-| vivo | 移动 / 电信 | `com.vivo.devicereg` | 已实测 |
-| 华为及旧荣耀 | 电信（数据） | `com.huawei.android.UEInfoCheck` | 未验证 |
-| 华为及旧荣耀 | 电信（短信） | `com.huawei.android.AutoRegSms` | 未验证 |
-| 华为 | 移动 | `com.huawei.regservice` | 未验证 |
+| vivo | 移动 / 电信 | `com.vivo.devicereg` | 部分机型暂不支持 |
+| 华为及旧荣耀 | 电信（数据） | `com.huawei.android.UEInfoCheck` | 已实测 |
+| 华为及旧荣耀 | 电信（短信） | `com.huawei.android.AutoRegSms` | 已实测 |
+| 华为 | 移动 | `com.huawei.regservice` | 已实测 |
 | 荣耀 | 电信（数据） | `com.hihonor.android.UEInfoCheck` | 未验证 |
 | 荣耀 | 电信（短信） | `com.hihonor.android.AutoRegSms` | 未验证 |
 | 荣耀 | 移动（归属推断） | `com.hihonor.regservice` | 未验证 |
