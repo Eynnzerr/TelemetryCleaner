@@ -868,7 +868,6 @@ private fun DetailFields(result: DetectedPackage, users: List<AndroidUser>) {
     InfoField(R.string.details_package, result.entry.packageName)
     result.versionName?.let { InfoField(R.string.details_version, it) }
     result.systemPath?.let { InfoField(R.string.details_system_path, it) }
-    result.entry.notes?.let { Text(stringResource(it), style = MaterialTheme.typography.bodyMedium) }
     val names = result.entry.carriers.map { stringResource(it.label()) }
     InfoField(R.string.details_carriers, names.joinToString().ifEmpty { stringResource(R.string.status_unknown) })
     Text(stringResource(R.string.details_installation), style = MaterialTheme.typography.titleSmall)

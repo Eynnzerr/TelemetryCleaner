@@ -121,8 +121,6 @@
     <string name="auto_cleanup_history_check_interrupted">检查已中断</string>
     <string name="package_directory_title">组件检查清单</string>
     <string name="package_directory_feedback">如有补充/反馈，欢迎提 <annotation link="issues">Issue</annotation></string>
-    <string name="package_directory_unverified">未验证</string>
-    <string name="package_directory_carrier_pending">归属待核验</string>
     <string name="package_family_cross_vendor">跨厂商</string>
     <string name="package_family_color_os">OPPO / 一加 / realme</string>
     <string name="package_family_xiaomi">小米 / Redmi / POCO</string>
@@ -130,15 +128,7 @@
     <string name="package_family_huawei">华为</string>
     <string name="package_family_honor">荣耀</string>
     <string name="package_family_flyme">魅族 / Flyme</string>
-    <string name="package_note_xiaomi_registration">公开样本与电话服务共用 UID。通信和恢复行为尚待实机验证。</string>
-    <string name="package_note_vivo_devicereg">部分旧版 vivo 固件将移动和电信自注册指向此包。当前系统的行为待核验。</string>
-    <string name="package_note_huawei_ue_info">旧款华为及华为时期荣耀设备上的中国电信自注册组件。当前系统上的行为待核验。</string>
-    <string name="package_note_huawei_regservice">华为 Mate 20 X 国行固件将此包映射到中国移动设备管理组件 HwCmccDm。</string>
-    <string name="package_note_huawei_auto_reg_sms">荣耀 30 Pro 的 HarmonyOS 4.2 样本保留此中国电信短信自注册包名。</string>
-    <string name="package_note_honor_ue_info">荣耀 GT Pro 的预置应用公示将其列为中国电信数据业务自注册组件。</string>
-    <string name="package_note_honor_auto_reg_sms">荣耀 GT Pro 的预置应用公示将其列为中国电信短信自注册组件。</string>
-    <string name="package_note_honor_regservice">荣耀公示描述了运营商获取设备信息的用途。中国移动归属依据荣耀固件中的华为 RegService 包名映射推断。</string>
-    <string name="package_note_meizu_regservice">部分 Flyme 固件中的预装组件。归属和具体行为待核验。</string>
+    <string name="package_family_nubia">努比亚 / 红魔</string>
     <string name="status_installed">已安装</string>
     <string name="status_disabled">已停用</string>
     <string name="status_restorable">已卸载</string>
@@ -185,7 +175,7 @@
     <string name="confirm_uninstall">卸载组件</string>
     <string name="confirm_restore">恢复组件</string>
     <string name="uninstall_description">将卸载所选空间中的组件并清除组件数据。</string>
-    <string name="uninstall_untested_warning">%1$s组件未做卸载测试，不保证卸载后行为。请谨慎评估，如卸载后出现异常，结果自负。</string>
+    <string name="uninstall_untested_warning">作者暂未对%1$s组件做卸载测试，不保证卸载后行为。请谨慎评估再决定是否卸载。</string>
     <string name="restore_description">将使用设备上已有的 APK，在所选空间恢复组件。</string>
     <string name="cancel">取消</string>
     <string name="done">完成</string>

@@ -7,7 +7,7 @@ TelemetryCleaner 可以检测国行 Android 固件预置的运营商组件，查
 <p>
   <img src="docs/screenshots/home.png" alt="主页展示 Shizuku 连接状态和运营商组件" width="235">
   <img src="docs/screenshots/permissions.png" alt="SystemHelper 权限页展示权限声明及主空间的授权状态" width="235">
-  <img src="docs/screenshots/catalogue.png" alt="组件检查清单按厂商展示包名和未验证标签" width="235">
+  <img src="docs/screenshots/catalogue.png" alt="组件检查清单按厂商展示包名" width="235">
 </p>
 
 ## 背景介绍
@@ -45,8 +45,9 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 | 华为 | 移动 | `com.huawei.regservice` | 已实测 |
 | 荣耀 | 电信（数据） | `com.hihonor.android.UEInfoCheck` | 未验证 |
 | 荣耀 | 电信（短信） | `com.hihonor.android.AutoRegSms` | 未验证 |
-| 荣耀 | 移动（归属推断） | `com.hihonor.regservice` | 未验证 |
-| 魅族 / Flyme | 归属待核验 | `com.meizu.regservice` | 未验证 |
+| 荣耀 | 移动 | `com.hihonor.regservice` | 未验证 |
+| 魅族 / Flyme | 移动 | `com.meizu.regservice` | 未验证 |
+| 初代红魔 | 电信 | `cn.nubia.register` | 未验证 |
 
 本人只验证了 SystemHelper 和 OPPO 组件的卸载。其他厂商因缺少设备暂未验证，如决定卸载，请自行承担风险。
 

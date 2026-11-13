@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
-import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.AndroidUser
 import com.eynnzerr.telemetrycleaner.data.AutoCleanupCheck
 import com.eynnzerr.telemetrycleaner.data.AutoCleanupCheckStatus
@@ -32,6 +31,7 @@ import com.eynnzerr.telemetrycleaner.data.ComponentPermission
 import com.eynnzerr.telemetrycleaner.data.DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
 import com.eynnzerr.telemetrycleaner.data.PackageAction
+import com.eynnzerr.telemetrycleaner.data.PackageDirectory
 import com.eynnzerr.telemetrycleaner.data.PackageEntry
 import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
@@ -55,9 +55,10 @@ private val shared = PackageEntry(
     "com.vivo.devicereg",
     "Device Management",
     setOf(Carrier.TELECOM, Carrier.MOBILE),
-    R.string.package_note_vivo_devicereg,
 )
-private val unassigned = PackageEntry("com.meizu.regservice", "RegService", emptySet())
+
+/** The Flyme component used in scan and uninstall previews. */
+private val flyme = PackageDirectory.variants.getValue("com.meizu.regservice")
 
 /** Supplies package-manager fixtures without reaching Shizuku or Android's package service. */
 private fun samplePackage(
@@ -140,7 +141,7 @@ internal class CleanerScreenPreviewProvider : PreviewParameterProvider<CleanerSt
             samplePackage(telecom, PackageState.UNKNOWN)
                 .copy(scanIssues = mapOf(owner.id to PackageScanIssue.UNRECOGNIZED_RESPONSE)),
             samplePackage(mobile, PackageState.INSTALLED),
-            samplePackage(unassigned, PackageState.UNKNOWN)
+            samplePackage(flyme, PackageState.UNKNOWN)
                 .copy(scanIssues = mapOf(owner.id to PackageScanIssue.QUERY_FAILED)),
         ),
         "分身安装状态缺失" to scannedState(
@@ -153,7 +154,7 @@ internal class CleanerScreenPreviewProvider : PreviewParameterProvider<CleanerSt
         ),
         "普通应用 · 卸载不可恢复" to scannedState(
             samplePackage(
-                unassigned,
+                flyme,
                 PackageState.INSTALLED,
                 PackageState.RESTORABLE,
                 hasVerifiedSystemIdentity = false,
@@ -199,7 +200,7 @@ internal class CleanerSheetPreviewProvider : PreviewParameterProvider<CleanerSta
         "确认卸载 · 未测试组件" to scannedState(
             samplePackage(telecom, PackageState.INSTALLED),
             samplePackage(shared, PackageState.INSTALLED),
-            samplePackage(unassigned, PackageState.INSTALLED),
+            samplePackage(flyme, PackageState.INSTALLED),
         ).copy(
             selectedUserIds = bothSpaces,
             panel = CleanerPanel.Confirmation(
@@ -208,7 +209,7 @@ internal class CleanerSheetPreviewProvider : PreviewParameterProvider<CleanerSta
                     telecomOwner,
                     ChangeTarget(shared.packageName, owner.id),
                     ChangeTarget(shared.packageName, clone.id),
-                    ChangeTarget(unassigned.packageName, owner.id),
+                    ChangeTarget(flyme.packageName, owner.id),
                 ),
             ),
         ),

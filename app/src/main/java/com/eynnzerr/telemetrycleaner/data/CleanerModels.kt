@@ -1,7 +1,5 @@
 package com.eynnzerr.telemetrycleaner.data
 
-import androidx.annotation.StringRes
-
 /** The app's ability to use Shizuku for package operations. */
 enum class ShizukuStatus {
     MISSING, STOPPED, PERMISSION_REQUIRED, CONNECTING, READY, ERROR
@@ -16,13 +14,11 @@ enum class Carrier { UNICOM, TELECOM, MOBILE }
  * @property packageName The Android package name used for exact lookup.
  * @property displayName The known name of the component.
  * @property carriers The associated carriers, or an empty set while attribution is pending.
- * @property notes Localized version or compatibility caveat, when available.
  */
 data class PackageEntry(
     val packageName: String,
     val displayName: String,
     val carriers: Set<Carrier>,
-    @get:StringRes val notes: Int? = null,
 )
 
 /**

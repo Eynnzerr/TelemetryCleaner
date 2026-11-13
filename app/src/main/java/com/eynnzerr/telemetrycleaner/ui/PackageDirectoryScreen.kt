@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -119,7 +118,7 @@ private fun PackageDirectoryFeedback(onOpenIssues: () -> Unit) {
     )
 }
 
-/** Shows one package identity, carrier attribution, and verification notice when applicable. */
+/** Shows one package identity and its carriers. */
 @Composable
 private fun PackageDirectoryEntry(entry: PackageEntry) {
     val carriers = entry.carriers.map { stringResource(it.label()) }
@@ -132,39 +131,19 @@ private fun PackageDirectoryEntry(entry: PackageEntry) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = entry.displayName,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (entry.packageName !in PackageDirectory.autoCleanupNames) {
-                    Text(
-                        text = stringResource(R.string.package_directory_unverified),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            Text(
+                text = entry.displayName,
+                style = MaterialTheme.typography.titleMedium,
+            )
             Text(
                 text = entry.packageName,
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = carriers.joinToString(" · ").ifEmpty { stringResource(R.string.package_directory_carrier_pending) },
+                text = carriers.joinToString(" · "),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            entry.notes?.let { note ->
-                Text(
-                    text = stringResource(note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
     }
 }
@@ -179,6 +158,7 @@ internal fun PackageFamily.label(): Int = when (this) {
     PackageFamily.HUAWEI -> R.string.package_family_huawei
     PackageFamily.HONOR -> R.string.package_family_honor
     PackageFamily.FLYME -> R.string.package_family_flyme
+    PackageFamily.NUBIA -> R.string.package_family_nubia
 }
 
 /** Renders the static catalogue without a device connection. */

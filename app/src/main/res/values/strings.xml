@@ -123,8 +123,6 @@
     <string name="auto_cleanup_history_check_interrupted">Check interrupted</string>
     <string name="package_directory_title">Bundled component directory</string>
     <string name="package_directory_feedback">To suggest an addition or share feedback, open an <annotation link="issues">issue</annotation>.</string>
-    <string name="package_directory_unverified">Unverified</string>
-    <string name="package_directory_carrier_pending">Carrier unverified</string>
     <string name="package_family_cross_vendor">Multiple manufacturers</string>
     <string name="package_family_color_os">OPPO / OnePlus / realme</string>
     <string name="package_family_xiaomi">Xiaomi / Redmi / POCO</string>
@@ -132,15 +130,7 @@
     <string name="package_family_huawei">Huawei</string>
     <string name="package_family_honor">Honor</string>
     <string name="package_family_flyme">Meizu / Flyme</string>
-    <string name="package_note_xiaomi_registration">Public samples share a UID with the phone service. Telephony and restore behavior still need device testing.</string>
-    <string name="package_note_vivo_devicereg">Some older vivo firmware uses this package for China Mobile and China Telecom self-registration. Its behavior on current firmware is unverified.</string>
-    <string name="package_note_huawei_ue_info">China Telecom self-registration component on older Huawei and Huawei-era Honor devices. Its behavior on current firmware is unverified.</string>
-    <string name="package_note_huawei_regservice">Chinese Huawei Mate 20 X firmware maps this package to HwCmccDm, the China Mobile device management component.</string>
-    <string name="package_note_huawei_auto_reg_sms">An Honor 30 Pro running HarmonyOS 4.2 retains this package name for China Telecom SMS self-registration.</string>
-    <string name="package_note_honor_ue_info">The Honor GT Pro preinstalled app disclosure identifies this as a China Telecom data self-registration component.</string>
-    <string name="package_note_honor_auto_reg_sms">The Honor GT Pro preinstalled app disclosure identifies this as a China Telecom SMS self-registration component.</string>
-    <string name="package_note_honor_regservice">Honor describes a component that lets carriers obtain device information. The China Mobile attribution is inferred from the Huawei RegService package mapping in Honor firmware.</string>
-    <string name="package_note_meizu_regservice">Preinstalled on some Flyme firmware. Carrier attribution and behavior are unverified.</string>
+    <string name="package_family_nubia">Nubia / REDMAGIC</string>
     <string name="status_installed">Installed</string>
     <string name="status_disabled">Disabled</string>
     <string name="status_restorable">Uninstalled</string>

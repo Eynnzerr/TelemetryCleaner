@@ -1,9 +1,7 @@
 package com.eynnzerr.telemetrycleaner.data
 
-import com.eynnzerr.telemetrycleaner.R
-
 /** Firmware families represented by the bundled package directory. */
-internal enum class PackageFamily { CROSS_VENDOR, COLOR_OS, XIAOMI, VIVO, HUAWEI, HONOR, FLYME }
+internal enum class PackageFamily { CROSS_VENDOR, COLOR_OS, XIAOMI, VIVO, HUAWEI, HONOR, FLYME, NUBIA }
 
 /**
  * Exact carrier component identities. Several ROMs use different package names, and one
@@ -20,69 +18,27 @@ internal object PackageDirectory {
             PackageEntry("com.coloros.regservice", "RegService", setOf(Carrier.MOBILE)),
         ),
         PackageFamily.XIAOMI to listOf(
-            PackageEntry(
-                "com.xiaomi.registration",
-                "AutoRegistration",
-                setOf(Carrier.TELECOM),
-                R.string.package_note_xiaomi_registration,
-            ),
+            PackageEntry("com.xiaomi.registration", "AutoRegistration", setOf(Carrier.TELECOM)),
             PackageEntry("com.miui.dmregservice", "RegService", setOf(Carrier.MOBILE)),
         ),
         PackageFamily.VIVO to listOf(
-            PackageEntry(
-                "com.vivo.devicereg",
-                "Device Management",
-                setOf(Carrier.MOBILE, Carrier.TELECOM),
-                R.string.package_note_vivo_devicereg,
-            ),
+            PackageEntry("com.vivo.devicereg", "Device Management", setOf(Carrier.MOBILE, Carrier.TELECOM)),
         ),
         PackageFamily.HUAWEI to listOf(
-            PackageEntry(
-                "com.huawei.android.UEInfoCheck",
-                "UEInfoCheck",
-                setOf(Carrier.TELECOM),
-                R.string.package_note_huawei_ue_info,
-            ),
-            PackageEntry(
-                "com.huawei.android.AutoRegSms",
-                "AutoRegSms",
-                setOf(Carrier.TELECOM),
-                R.string.package_note_huawei_auto_reg_sms,
-            ),
-            PackageEntry(
-                "com.huawei.regservice",
-                "RegService",
-                setOf(Carrier.MOBILE),
-                R.string.package_note_huawei_regservice,
-            ),
+            PackageEntry("com.huawei.android.UEInfoCheck", "UEInfoCheck", setOf(Carrier.TELECOM)),
+            PackageEntry("com.huawei.android.AutoRegSms", "AutoRegSms", setOf(Carrier.TELECOM)),
+            PackageEntry("com.huawei.regservice", "RegService", setOf(Carrier.MOBILE)),
         ),
         PackageFamily.HONOR to listOf(
-            PackageEntry(
-                "com.hihonor.android.UEInfoCheck",
-                "UEInfoCheck",
-                setOf(Carrier.TELECOM),
-                R.string.package_note_honor_ue_info,
-            ),
-            PackageEntry(
-                "com.hihonor.android.AutoRegSms",
-                "AutoRegSms",
-                setOf(Carrier.TELECOM),
-                R.string.package_note_honor_auto_reg_sms,
-            ),
-            PackageEntry(
-                "com.hihonor.regservice",
-                "RegService",
-                setOf(Carrier.MOBILE),
-                R.string.package_note_honor_regservice,
-            ),
+            PackageEntry("com.hihonor.android.UEInfoCheck", "UEInfoCheck", setOf(Carrier.TELECOM)),
+            PackageEntry("com.hihonor.android.AutoRegSms", "AutoRegSms", setOf(Carrier.TELECOM)),
+            PackageEntry("com.hihonor.regservice", "RegService", setOf(Carrier.MOBILE)),
         ),
         PackageFamily.FLYME to listOf(
-            PackageEntry(
-                "com.meizu.regservice",
-                "RegService",
-                emptySet(),
-                R.string.package_note_meizu_regservice,
-            ),
+            PackageEntry("com.meizu.regservice", "RegService", setOf(Carrier.MOBILE)),
+        ),
+        PackageFamily.NUBIA to listOf(
+            PackageEntry("cn.nubia.register", "RegisterApplication", setOf(Carrier.TELECOM)),
         ),
     )
 
