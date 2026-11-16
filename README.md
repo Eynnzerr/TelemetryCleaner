@@ -13,7 +13,7 @@ TelemetryCleaner 可以检测国行 Android 固件预置的运营商组件，查
 您可通过不限于以下方式参与贡献，欢迎 PR：
 1. 提供清单未覆盖的厂商+运营商+包名线索，在 README.md 中补充即可；
 2. 提供针对某模块的实测与分析报告，不限制是否为 AI 生成，但需保证真实性。放于 docs 目录中即可；
-3. 协助实现未支持的免 Root 卸载功能（如**现版本不支持部分 vivo 系的电信/移动组件卸载**）；
+3. ~协助实现未支持的免 Root 卸载功能（如**现版本不支持部分 vivo 系的电信/移动组件卸载**）~；
 4. 对软件功能的反馈或改进。
 
 ## 背景介绍
@@ -34,6 +34,8 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 
 卸载按选定空间执行，会清除该空间中的组件数据。恢复使用系统保留的 APK。自动清理默认关闭，开启后按配置的周期检查所选空间，只处理自动清理名单内的组件。
 
+**已知限制：vivo OriginOS 的 PMS 底层中，电信/移动组件 com.vivo.devicereg 被列入了 vivo 系统保护名单，暂无法在非 Root 情况下完成卸载。其他厂商经实测反馈均支持。**
+
 ## 内置组件清单
 
 表中的「未验证」指尚无本人在相应厂商设备上的卸载验证。
@@ -45,17 +47,17 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 | OPPO / 一加 / realme | 移动 | `com.coloros.regservice` | 已实测 |
 | 小米 / Redmi / POCO | 电信 | `com.xiaomi.registration` | 已实测 |
 | 小米 / Redmi / POCO | 移动 | `com.miui.dmregservice` | 已实测 |
-| vivo | 移动 / 电信 | `com.vivo.devicereg` | 部分机型暂不支持 |
+| vivo | 移动 / 电信 | `com.vivo.devicereg` | 暂不支持 |
 | 华为及旧荣耀 | 电信（数据） | `com.huawei.android.UEInfoCheck` | 已实测 |
 | 华为及旧荣耀 | 电信（短信） | `com.huawei.android.AutoRegSms` | 已实测 |
 | 华为 | 移动 | `com.huawei.regservice` | 已实测 |
-| 荣耀 | 电信（数据） | `com.hihonor.android.UEInfoCheck` | 未验证 |
-| 荣耀 | 电信（短信） | `com.hihonor.android.AutoRegSms` | 未验证 |
-| 荣耀 | 移动 | `com.hihonor.regservice` | 未验证 |
-| 魅族 / Flyme | 移动 | `com.meizu.regservice` | 未验证 |
+| 荣耀 | 电信（数据） | `com.hihonor.android.UEInfoCheck` | 已实测 |
+| 荣耀 | 电信（短信） | `com.hihonor.android.AutoRegSms` | 已实测 |
+| 荣耀 | 移动 | `com.hihonor.regservice` | 已实测 |
+| 魅族 / Flyme | 移动 | `com.meizu.regservice` | 已实测 |
 | 初代红魔 | 电信 | `cn.nubia.register` | 未验证 |
 
-本人只验证了 SystemHelper 和 OPPO 组件的卸载，小米、华为由网友验证实测。其他厂商因缺少设备暂未验证，如决定卸载，请自行承担风险。**如在 B 站评论区已有反馈：vivo 卸载 Device Management 后通话录音功能失效。**
+本人只验证了 SystemHelper 和 OPPO 组件的卸载，小米、华为由网友验证实测。其他厂商因缺少设备暂未验证，如决定卸载，请自行承担风险。
 
 欢迎在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 反馈某厂商某模块卸载后使用正常，也欢迎补充组件。附上机型、系统版本、包名和实际结果，便于复核。
 
