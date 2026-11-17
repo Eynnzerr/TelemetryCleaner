@@ -89,10 +89,10 @@ data class CleanerState(
     fun canSelectPackage(packageName: String): Boolean =
         PackageAction.entries.any { action -> targetsFor(action, packageName).isNotEmpty() }
 
-    /** Returns the operator packages with an available action in the selected spaces. */
+    /** Returns the packages with an available action in the selected spaces. */
     fun selectablePackageNames(): Set<String> =
         snapshot?.packages.orEmpty()
-            .filter { it.entry.carriers.isNotEmpty() && canSelectPackage(it.entry.packageName) }
+            .filter { canSelectPackage(it.entry.packageName) }
             .mapTo(mutableSetOf()) { it.entry.packageName }
 }
 
@@ -113,7 +113,7 @@ sealed interface CleanerIntent {
     /** Toggles [packageName] in the batch selection. */
     data class TogglePackage(val packageName: String) : CleanerIntent
 
-    /** Selects every eligible operator package, or clears the selection if all are checked. */
+    /** Selects every eligible package, or clears the selection if all are checked. */
     data object ToggleAllPackages : CleanerIntent
 
     /** Opens the details of [packageName]. */

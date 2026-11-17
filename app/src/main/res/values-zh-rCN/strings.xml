@@ -107,7 +107,6 @@
     <string name="select_all">全选</string>
     <string name="deselect_all">取消全选</string>
     <string name="section_previous_results">上次检测结果</string>
-    <string name="section_candidate_components">待核验组件</string>
     <string name="scope_spaces">检查范围</string>
     <string name="scope_unavailable">完成检测后即可选择空间。</string>
     <string name="scope_space_unavailable">暂时无法核验此空间</string>

@@ -94,6 +94,7 @@ import com.eynnzerr.telemetrycleaner.data.ChangeTarget
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
+import com.eynnzerr.telemetrycleaner.data.PackageFamily
 import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
@@ -173,14 +174,18 @@ fun CleanerScreen(
                     items(Carrier.entries.size, key = { Carrier.entries[it].name }) { index ->
                         CarrierGroup(Carrier.entries[index], snapshot, state, onIntent)
                     }
-                    val (candidates, unreadCandidates) = snapshot.packages
+                    val manufacturerPackages = snapshot.packages
                         .filter { it.entry.carriers.isEmpty() }
-                        .partition { it.hasVisibleRecord() }
-                    val candidateIssues = unreadCandidates.filter { result ->
-                        state.selectedUserIds.any { result.hasUnresolvedStatus(it) }
-                    }
-                    if (candidates.isNotEmpty() || candidateIssues.isNotEmpty()) {
-                        item(key = "unverified_components") {
+                        .associateBy { it.entry.packageName }
+                    PackageDirectory.groups.forEach { (family, entries) ->
+                        val (visible, hidden) = entries.mapNotNull { manufacturerPackages[it.packageName] }
+                            .partition { it.hasVisibleRecord() }
+                        val issues = hidden.filter { result ->
+                            state.selectedUserIds.any { result.hasUnresolvedStatus(it) }
+                        }
+                        if (visible.isEmpty() && issues.isEmpty()) return@forEach
+
+                        item(key = "manufacturer_${family.name}") {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = MaterialTheme.shapes.extraLarge,
@@ -188,13 +193,19 @@ fun CleanerScreen(
                             ) {
                                 Column {
                                     Text(
-                                        stringResource(R.string.section_candidate_components),
+                                        stringResource(
+                                            when (family) {
+                                                PackageFamily.COLOR_OS -> R.string.manufacturer_oppo
+                                                PackageFamily.XIAOMI -> R.string.manufacturer_xiaomi
+                                                else -> family.label()
+                                            },
+                                        ),
                                         style = MaterialTheme.typography.titleMediumEmphasized,
                                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                                             .semantics { heading() },
                                     )
-                                    PackageScanIssues(candidateIssues, state.selectedUserIds)
-                                    candidates.forEach { ComponentRow(it, snapshot, state, onIntent) }
+                                    PackageScanIssues(issues, state.selectedUserIds)
+                                    visible.forEach { ComponentRow(it, snapshot, state, onIntent) }
                                 }
                             }
                         }
@@ -259,7 +270,7 @@ private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) 
         }
         ready && snapshot != null -> {
             val count = snapshot.packages.count { result ->
-                result.entry.carriers.isNotEmpty() && state.selectedUserIds.any { userId ->
+                state.selectedUserIds.any { userId ->
                     result.users[userId] == PackageState.INSTALLED ||
                         result.users[userId] == PackageState.DISABLED
                 }
@@ -905,8 +916,10 @@ private fun DetailFields(result: DetectedPackage, users: List<AndroidUser>) {
     InfoField(R.string.details_package, result.entry.packageName)
     result.versionName?.let { InfoField(R.string.details_version, it) }
     result.systemPath?.let { InfoField(R.string.details_system_path, it) }
-    val names = result.entry.carriers.map { stringResource(it.label()) }
-    InfoField(R.string.details_carriers, names.joinToString().ifEmpty { stringResource(R.string.status_unknown) })
+    if (result.entry.carriers.isNotEmpty()) {
+        val names = result.entry.carriers.map { stringResource(it.label()) }
+        InfoField(R.string.details_carriers, names.joinToString())
+    }
     Text(stringResource(R.string.details_installation), style = MaterialTheme.typography.titleSmall)
     users.forEach { user ->
         val status = stringResource(result.installationStatusLabel(user.id))

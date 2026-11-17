@@ -87,7 +87,7 @@
     <string name="root_setup_explanation">Check that your device is rooted and that apps can request root access.</string>
     <string name="root_permission_explanation">Allow access in your superuser manager.</string>
     <string name="root_error_explanation">Check Telemetry Cleaner’s access in your superuser manager, then try again.</string>
-    <string name="scanning">Checking carrier components</string>
+    <string name="scanning">Checking components</string>
     <string name="changing">Updating selected components</string>
     <string name="scan_ready">Ready to check</string>
     <string name="scan_preparing">Preparing to check</string>
@@ -109,7 +109,8 @@
     <string name="select_all">Select all</string>
     <string name="deselect_all">Deselect all</string>
     <string name="section_previous_results">Last scan</string>
-    <string name="section_candidate_components">Components to verify</string>
+    <string name="manufacturer_oppo" translatable="false">OPPO</string>
+    <string name="manufacturer_xiaomi" translatable="false">XiaoMi</string>
     <string name="scope_spaces">Scan scope</string>
     <string name="scope_unavailable">Complete a scan to see available spaces.</string>
     <string name="scope_space_unavailable">Space identity could not be verified</string>

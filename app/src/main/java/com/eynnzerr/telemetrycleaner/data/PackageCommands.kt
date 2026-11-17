@@ -39,7 +39,7 @@ internal sealed interface PackageReading {
 internal class UserListScanException(val issue: PackageScanIssue) : Exception()
 
 /**
- * Queries and changes only catalogued carrier packages through the selected connection.
+ * Queries catalogued packages and applies changes to eligible entries through the selected connection.
  *
  * @property executor The connection used for every read and write within the operation.
  */
