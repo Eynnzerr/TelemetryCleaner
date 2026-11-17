@@ -4,8 +4,8 @@ package com.eynnzerr.telemetrycleaner.data
 internal enum class PackageFamily { CROSS_VENDOR, COLOR_OS, XIAOMI, VIVO, HUAWEI, HONOR, FLYME, NUBIA }
 
 /**
- * Exact carrier component identities. Several ROMs use different package names, and one
- * component may handle registration for two carriers. Each physical package is listed once.
+ * Exact component identities for scans. A carrier component may serve multiple carriers.
+ * Each physical package is listed once.
  */
 internal object PackageDirectory {
     /** Known package variants grouped by their documented firmware family. */
@@ -20,6 +20,9 @@ internal object PackageDirectory {
         PackageFamily.XIAOMI to listOf(
             PackageEntry("com.xiaomi.registration", "AutoRegistration", setOf(Carrier.TELECOM)),
             PackageEntry("com.miui.dmregservice", "RegService", setOf(Carrier.MOBILE)),
+            PackageEntry("com.xiaomi.security.onetrack", "SecurityOnetrackService", emptySet()),
+            PackageEntry("com.miui.misightservice", "MiSightService", emptySet()),
+            PackageEntry("com.miui.analytics", "Analytics", emptySet()),
         ),
         PackageFamily.VIVO to listOf(
             PackageEntry("com.vivo.devicereg", "Device Management", setOf(Carrier.MOBILE, Carrier.TELECOM)),

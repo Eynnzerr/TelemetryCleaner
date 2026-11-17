@@ -24,7 +24,8 @@ import com.eynnzerr.telemetrycleaner.data.AutoCleanupHistoryStore
 import com.eynnzerr.telemetrycleaner.data.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.CleanerRepository
 import com.eynnzerr.telemetrycleaner.data.CleanerSettings
-import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.ui.label
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -53,8 +54,8 @@ class AutoCleanupService : Service() {
     /** Shares persisted check and removal results with the history screen. */
     private val history: AutoCleanupHistoryStore by inject()
 
-    /** Lazily creates service-owned Shizuku listeners after foreground promotion. */
-    private val repository = inject<CleanerRepository>()
+    /** Accesses the shared connection after foreground promotion. */
+    private val repository: CleanerRepository by inject()
 
     /** Owns work and notification updates for this service instance. */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -65,7 +66,7 @@ class AutoCleanupService : Service() {
     /** The service is controlled by starts and stops from its own app. */
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** Promotes the service before opening Shizuku and honors the notification stop action. */
+    /** Promotes the service before accessing the backend and honors the notification stop action. */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             serviceScope.launch {
@@ -109,10 +110,9 @@ class AutoCleanupService : Service() {
         return START_STICKY
     }
 
-    /** Releases the Shizuku listeners and clears the foreground notification. */
+    /** Cancels monitoring and clears the foreground notification. */
     override fun onDestroy() {
         serviceScope.cancel()
-        if (repository.isInitialized()) repository.value.close()
         if (settings.autoCleanupStatus.value != AutoCleanupStatus.OFF) {
             settings.setAutoCleanupStatus(AutoCleanupStatus.START_FAILED)
         }
@@ -120,9 +120,9 @@ class AutoCleanupService : Service() {
         super.onDestroy()
     }
 
-    /** Restarts the timer when the user changes scope or Shizuku becomes ready. */
+    /** Restarts the timer when the scope or backend changes. */
     private suspend fun monitor() {
-        val cleaner = repository.value
+        val cleaner = repository
         val cleanupPreferences = settings.preferences.distinctUntilChangedBy {
             it.autoCleanupEnabled to it.selectedUserSerials
         }
@@ -135,10 +135,13 @@ class AutoCleanupService : Service() {
                 return@collectLatest
             }
             while (currentCoroutineContext().isActive) {
-                if (connection == ShizukuStatus.READY) {
-                    checkPackages(cleaner)
+                if (connection.status == PrivilegeStatus.READY) {
+                    checkPackages(cleaner, connection.backend)
                 } else {
-                    publish(AutoCleanupStatus.WAITING_FOR_SHIZUKU)
+                    publish(
+                        if (connection.backend == PrivilegeBackend.ROOT) AutoCleanupStatus.WAITING_FOR_ROOT
+                        else AutoCleanupStatus.WAITING_FOR_SHIZUKU,
+                    )
                 }
                 if (!awaitNextCheck()) return@collectLatest
                 cleaner.refreshConnection()
@@ -167,14 +170,14 @@ class AutoCleanupService : Service() {
     }
 
     /** Runs one attempt and reports whether scanning or a target change failed. */
-    private suspend fun checkPackages(cleaner: CleanerRepository) {
+    private suspend fun checkPackages(cleaner: CleanerRepository, backend: PrivilegeBackend) {
         if (settings.readPreferences().selectedUserSerials?.isEmpty() == true) {
             publish(AutoCleanupStatus.NO_SPACES)
             return
         }
         publish(AutoCleanupStatus.CHECKING)
         val resultStatus = try {
-            val result = cleaner.autoCleanup(settings, history)
+            val result = cleaner.autoCleanup(history, backend)
             currentCoroutineContext().ensureActive()
             when {
                 !result.hasSpaces -> AutoCleanupCheckStatus.NO_SPACES

@@ -140,10 +140,12 @@ private fun PackageDirectoryEntry(entry: PackageEntry) {
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                text = carriers.joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            if (carriers.isNotEmpty()) {
+                Text(
+                    text = carriers.joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }

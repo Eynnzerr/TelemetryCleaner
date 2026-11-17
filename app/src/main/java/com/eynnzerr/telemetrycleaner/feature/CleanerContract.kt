@@ -3,11 +3,13 @@ package com.eynnzerr.telemetrycleaner.feature
 import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
 import com.eynnzerr.telemetrycleaner.data.ChangeTarget
 import com.eynnzerr.telemetrycleaner.data.PackageAction
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
-import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
 
 /** Work in progress on the cleaner screen. */
-enum class CleanerActivity { IDLE, SCANNING, CHANGING }
+enum class CleanerActivity { IDLE, SWITCHING_BACKEND, SCANNING, CHANGING }
 
 /** A screen-level failure that can be described with localized UI copy. */
 enum class CleanerError {
@@ -17,6 +19,7 @@ enum class CleanerError {
     SCAN_SPACE_RESPONSE_INVALID,
     SCAN_CURRENT_SPACE_MISSING,
     ACTION_FAILED,
+    BACKEND_SELECTION_FAILED,
 }
 
 /** The currently presented sheet and the data needed to render it. */
@@ -40,7 +43,7 @@ sealed interface CleanerPanel {
 /**
  * Immutable screen state produced by the cleaner reducer.
  *
- * @property connection Most recent Shizuku connection and authorization status.
+ * @property connection The selected privilege backend and its authorization status.
  * @property snapshot Last observed package states. In-flight changes invalidate affected states.
  * @property selectedUserIds User spaces included in the next operation.
  * @property selectedPackageNames Packages checked for batch operations.
@@ -50,7 +53,7 @@ sealed interface CleanerPanel {
  * @property workId Associates scan and operation responses with the request that started them.
  */
 data class CleanerState(
-    val connection: ShizukuStatus = ShizukuStatus.CONNECTING,
+    val connection: PrivilegeConnection = PrivilegeConnection(PrivilegeBackend.SHIZUKU, PrivilegeStatus.CONNECTING),
     val snapshot: ScanSnapshot? = null,
     val selectedUserIds: Set<Int> = emptySet(),
     val selectedPackageNames: Set<String> = emptySet(),
@@ -61,7 +64,7 @@ data class CleanerState(
 ) {
     /** Whether the current snapshot can be used to offer package operations. */
     val readyForActions: Boolean
-        get() = connection == ShizukuStatus.READY &&
+        get() = connection.status == PrivilegeStatus.READY &&
             activity == CleanerActivity.IDLE &&
             snapshot != null &&
             error == null
@@ -86,20 +89,23 @@ data class CleanerState(
     fun canSelectPackage(packageName: String): Boolean =
         PackageAction.entries.any { action -> targetsFor(action, packageName).isNotEmpty() }
 
-    /** Returns the operator packages with an available action in the selected spaces. */
+    /** Returns the packages with an available action in the selected spaces. */
     fun selectablePackageNames(): Set<String> =
         snapshot?.packages.orEmpty()
-            .filter { it.entry.carriers.isNotEmpty() && canSelectPackage(it.entry.packageName) }
+            .filter { canSelectPackage(it.entry.packageName) }
             .mapTo(mutableSetOf()) { it.entry.packageName }
 }
 
 /** User interactions accepted by the cleaner store. */
 sealed interface CleanerIntent {
-    /** Rechecks Shizuku and starts a fresh scan when connected. */
+    /** Rechecks the selected backend and starts a fresh scan when connected. */
     data object Refresh : CleanerIntent
 
-    /** Opens the Shizuku authorization prompt. */
+    /** Requests authorization from the selected backend. */
     data object RequestPermission : CleanerIntent
+
+    /** Saves [backend] as the source of privileged access. */
+    data class SelectBackend(val backend: PrivilegeBackend) : CleanerIntent
 
     /** Toggles the inclusion of the space identified by [userId]. */
     data class ToggleSpace(val userId: Int) : CleanerIntent
@@ -107,7 +113,7 @@ sealed interface CleanerIntent {
     /** Toggles [packageName] in the batch selection. */
     data class TogglePackage(val packageName: String) : CleanerIntent
 
-    /** Selects every eligible operator package, or clears the selection if all are checked. */
+    /** Selects every eligible package, or clears the selection if all are checked. */
     data object ToggleAllPackages : CleanerIntent
 
     /** Opens the details of [packageName]. */

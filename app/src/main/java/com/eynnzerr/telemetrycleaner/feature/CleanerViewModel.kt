@@ -7,7 +7,8 @@ import com.eynnzerr.telemetrycleaner.data.CleanerRepository
 import com.eynnzerr.telemetrycleaner.data.CleanerSettings
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
-import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.UserListScanException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -42,8 +43,8 @@ internal class CleanerViewModel(
             }
         }
         viewModelScope.launch {
-            repository.connection.collect { status ->
-                messages.send(CleanerMessage.ConnectionChanged(status))
+            repository.connection.collect { connection ->
+                messages.send(CleanerMessage.ConnectionChanged(connection))
             }
         }
         viewModelScope.launch {
@@ -62,26 +63,39 @@ internal class CleanerViewModel(
     private fun execute(effect: CleanerEffect) {
         viewModelScope.launch {
             when (effect) {
-                CleanerEffect.RefreshConnection -> checkConnection(repository::refreshConnection)
+                CleanerEffect.RefreshConnection -> checkConnection { repository.refreshConnection() }
                 CleanerEffect.RequestPermission -> checkConnection(repository::requestPermission)
+                is CleanerEffect.SelectBackend -> selectBackend(effect.backend)
                 is CleanerEffect.Scan -> scan(effect.id)
                 is CleanerEffect.Change -> change(effect)
             }
         }
     }
 
-    /** Runs a Shizuku connection interaction on the main dispatcher. */
-    private suspend fun checkConnection(action: () -> Unit) {
+    /** Runs a connection interaction and reports failures for the selected backend. */
+    private suspend fun checkConnection(action: suspend () -> Unit) {
         try {
             action()
-            if (mutableState.value.connection == ShizukuStatus.ERROR) {
+            if (mutableState.value.connection.status == PrivilegeStatus.ERROR) {
                 // A recovered call may leave the repository's observable status unchanged.
                 messages.send(CleanerMessage.ConnectionChanged(repository.connection.value))
             }
         } catch (_: Exception) {
             currentCoroutineContext().ensureActive()
-            messages.send(CleanerMessage.ConnectionChanged(ShizukuStatus.ERROR))
+            val connection = repository.connection.value.copy(status = PrivilegeStatus.ERROR)
+            messages.send(CleanerMessage.ConnectionChanged(connection))
         }
+    }
+
+    /** Saves the user's backend choice and reports the resulting connection state. */
+    private suspend fun selectBackend(backend: PrivilegeBackend) {
+        val saved = try {
+            repository.selectBackend(backend)
+        } catch (_: Exception) {
+            currentCoroutineContext().ensureActive()
+            false
+        }
+        messages.send(CleanerMessage.BackendSelectionFinished(saved, repository.connection.value))
     }
 
     /** Reads package states without blocking the message loop. */
@@ -110,7 +124,7 @@ internal class CleanerViewModel(
         val message = try {
             val disableOnUninstallFailure = action == PackageAction.UNINSTALL &&
                 settings.readPreferences().disableOnUninstallFailure
-            val outcomes = repository.change(targets, action, disableOnUninstallFailure)
+            val outcomes = repository.change(targets, action, disableOnUninstallFailure, expectedBackend = effect.backend)
             CleanerMessage.ChangeFinished(effect.id, action, outcomes, requestFailed = false)
         } catch (_: Exception) {
             currentCoroutineContext().ensureActive()
@@ -120,9 +134,8 @@ internal class CleanerViewModel(
         messages.send(message)
     }
 
-    /** Releases the repository's Shizuku listeners with the screen store. */
+    /** Releases the screen's message queue. */
     override fun onCleared() {
         messages.close()
-        repository.close()
     }
 }

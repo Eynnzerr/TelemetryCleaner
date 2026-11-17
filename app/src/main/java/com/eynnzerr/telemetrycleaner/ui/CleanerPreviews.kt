@@ -37,7 +37,9 @@ import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
 import com.eynnzerr.telemetrycleaner.data.PermissionProtection
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
-import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.ThemePalette
 import com.eynnzerr.telemetrycleaner.feature.CleanerActivity
 import com.eynnzerr.telemetrycleaner.feature.CleanerError
@@ -88,7 +90,7 @@ private fun samplePackage(
 
 /** Creates a state whose scan belongs to the same user profile as the running app. */
 private fun scannedState(vararg packages: DetectedPackage) = CleanerState(
-    connection = ShizukuStatus.READY,
+    connection = shizukuConnection(PrivilegeStatus.READY),
     snapshot = ScanSnapshot(owner.id, profiles, packages.toList()),
     selectedUserIds = setOf(owner.id),
 )
@@ -117,16 +119,27 @@ private val telecomClone = ChangeTarget(telecom.packageName, clone.id)
 private val unicomOwner = ChangeTarget(unicom.packageName, owner.id)
 private val unicomClone = ChangeTarget(unicom.packageName, clone.id)
 
+/** Creates a Shizuku connection fixture without starting the service. */
+private fun shizukuConnection(status: PrivilegeStatus): PrivilegeConnection =
+    PrivilegeConnection(PrivilegeBackend.SHIZUKU, status)
+
 /** Named fixtures for connection, scan, package and selection states on the main screen. */
 internal class CleanerScreenPreviewProvider : PreviewParameterProvider<CleanerState> {
     private val cases = listOf(
-        "未安装 Shizuku" to CleanerState(connection = ShizukuStatus.MISSING),
-        "Shizuku 未启动" to CleanerState(connection = ShizukuStatus.STOPPED),
-        "等待授权" to CleanerState(connection = ShizukuStatus.PERMISSION_REQUIRED),
-        "正在连接" to CleanerState(connection = ShizukuStatus.CONNECTING),
-        "连接失败" to CleanerState(connection = ShizukuStatus.ERROR),
-        "已连接 · 等待检测" to CleanerState(connection = ShizukuStatus.READY),
-        "首次检测中" to CleanerState(connection = ShizukuStatus.READY, activity = CleanerActivity.SCANNING),
+        "未安装 Shizuku" to CleanerState(connection = shizukuConnection(PrivilegeStatus.MISSING)),
+        "Shizuku 未启动" to CleanerState(connection = shizukuConnection(PrivilegeStatus.STOPPED)),
+        "等待授权" to CleanerState(connection = shizukuConnection(PrivilegeStatus.PERMISSION_REQUIRED)),
+        "正在连接" to CleanerState(),
+        "连接失败" to CleanerState(connection = shizukuConnection(PrivilegeStatus.ERROR)),
+        "已连接 · 等待检测" to CleanerState(connection = shizukuConnection(PrivilegeStatus.READY)),
+        "Root 未授权" to CleanerState(
+            connection = PrivilegeConnection(PrivilegeBackend.ROOT, PrivilegeStatus.PERMISSION_REQUIRED),
+        ),
+        "Root 已连接" to scan.copy(connection = PrivilegeConnection(PrivilegeBackend.ROOT, PrivilegeStatus.READY)),
+        "首次检测中" to CleanerState(
+            connection = shizukuConnection(PrivilegeStatus.READY),
+            activity = CleanerActivity.SCANNING,
+        ),
         "刷新已有结果" to scan.copy(activity = CleanerActivity.SCANNING),
         "已安装与已卸载" to scan,
         "全部已卸载" to scannedState(
@@ -178,12 +191,12 @@ internal class CleanerScreenPreviewProvider : PreviewParameterProvider<CleanerSt
             samplePackage(telecom, PackageState.INSTALLED),
         ).copy(activity = CleanerActivity.CHANGING),
         "无法读取用户空间" to CleanerState(
-            connection = ShizukuStatus.READY,
+            connection = shizukuConnection(PrivilegeStatus.READY),
             error = CleanerError.SCAN_SPACE_PERMISSION_DENIED,
         ),
         "刷新失败 · 上次结果" to scan.copy(error = CleanerError.SCAN_FAILED),
         "操作失败 · 上次结果" to scan.copy(error = CleanerError.ACTION_FAILED),
-        "连接断开 · 上次结果" to scan.copy(connection = ShizukuStatus.STOPPED),
+        "连接断开 · 上次结果" to scan.copy(connection = shizukuConnection(PrivilegeStatus.STOPPED)),
     )
 
     /** Supplies all main-screen examples in their display order. */
@@ -407,7 +420,10 @@ private fun SettingsScreenPreview(
     @PreviewParameter(AutoCleanupPreviewProvider::class) status: AutoCleanupStatus,
 ) {
     val state = when (status) {
-        AutoCleanupStatus.WAITING_FOR_SHIZUKU -> CleanerState(connection = ShizukuStatus.STOPPED)
+        AutoCleanupStatus.WAITING_FOR_SHIZUKU -> CleanerState(connection = shizukuConnection(PrivilegeStatus.STOPPED))
+        AutoCleanupStatus.WAITING_FOR_ROOT -> CleanerState(
+            connection = PrivilegeConnection(PrivilegeBackend.ROOT, PrivilegeStatus.STOPPED),
+        )
         AutoCleanupStatus.NO_SPACES -> scan.copy(selectedUserIds = emptySet())
         AutoCleanupStatus.MONITORING -> scan.copy(selectedUserIds = bothSpaces)
         else -> scan
@@ -416,6 +432,7 @@ private fun SettingsScreenPreview(
     TelemetryCleanerTheme(dynamicColor = false) {
         SettingsScreen(
             state = state,
+            onSelectBackend = {},
             autoCleanupEnabled = status != AutoCleanupStatus.OFF,
             autoCleanupStatus = status,
             autoCleanupIntervalMinutes = intervalMinutes,

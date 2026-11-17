@@ -1,9 +1,20 @@
 package com.eynnzerr.telemetrycleaner.data
 
-/** The app's ability to use Shizuku for package operations. */
-enum class ShizukuStatus {
+/** The user's choice of how to authorize package operations. */
+enum class PrivilegeBackend { SHIZUKU, ROOT }
+
+/** The availability of the selected package operation backend. */
+enum class PrivilegeStatus {
     MISSING, STOPPED, PERMISSION_REQUIRED, CONNECTING, READY, ERROR
 }
+
+/**
+ * The backend selected for both manual operations and automatic cleanup.
+ *
+ * @property backend The user's selected authorization method.
+ * @property status The current availability of that method.
+ */
+data class PrivilegeConnection(val backend: PrivilegeBackend, val status: PrivilegeStatus)
 
 /** The carriers served by the preinstalled collection components. */
 enum class Carrier { UNICOM, TELECOM, MOBILE }
@@ -13,7 +24,7 @@ enum class Carrier { UNICOM, TELECOM, MOBILE }
  *
  * @property packageName The Android package name used for exact lookup.
  * @property displayName The known name of the component.
- * @property carriers The associated carriers, or an empty set while attribution is pending.
+ * @property carriers The associated carriers, if known and applicable.
  */
 data class PackageEntry(
     val packageName: String,
@@ -92,7 +103,7 @@ data class DetectedPackage(
  *
  * @property currentUserId The user containing the calling instance of this app.
  * @property users The users observed by the privileged service.
- * @property packages The carrier packages and their per-user state.
+ * @property packages The catalogued packages and their per-user state.
  */
 data class ScanSnapshot(
     val currentUserId: Int,
