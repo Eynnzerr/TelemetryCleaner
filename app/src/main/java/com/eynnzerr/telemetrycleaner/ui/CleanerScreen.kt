@@ -195,7 +195,6 @@ fun CleanerScreen(
                                     Text(
                                         stringResource(
                                             when (family) {
-                                                PackageFamily.COLOR_OS -> R.string.manufacturer_oppo
                                                 PackageFamily.XIAOMI -> R.string.manufacturer_xiaomi
                                                 else -> family.label()
                                             },

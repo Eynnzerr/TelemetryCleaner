@@ -109,7 +109,6 @@
     <string name="select_all">Select all</string>
     <string name="deselect_all">Deselect all</string>
     <string name="section_previous_results">Last scan</string>
-    <string name="manufacturer_oppo" translatable="false">OPPO</string>
     <string name="manufacturer_xiaomi" translatable="false">XiaoMi</string>
     <string name="scope_spaces">Scan scope</string>
     <string name="scope_unavailable">Complete a scan to see available spaces.</string>

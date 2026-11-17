@@ -16,7 +16,6 @@ internal object PackageDirectory {
         PackageFamily.COLOR_OS to listOf(
             PackageEntry("com.oppo.ctautoregist", "CTAutoRegist", setOf(Carrier.TELECOM)),
             PackageEntry("com.coloros.regservice", "RegService", setOf(Carrier.MOBILE)),
-            PackageEntry("com.oplus.statistics.rom", "Basic Data Services (DCS)", emptySet()),
         ),
         PackageFamily.XIAOMI to listOf(
             PackageEntry("com.xiaomi.registration", "AutoRegistration", setOf(Carrier.TELECOM)),
