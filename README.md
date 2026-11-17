@@ -69,3 +69,10 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 - [ ] 努比亚、国行三星、魅族运营商遥测组件包名收集
 - [ ] 扩充更多组件检测（包括厂商自己的敏感数据收集组件）作为可选项
 - [x] 部分 vivo 系不支持卸载 SystemHelper 外的组件。暂提供冻结策略作为兜底
+
+<a href="https://www.star-history.com/?repos=Eynnzerr%2FTelemetryCleaner&amp;type=date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=eynnzerr%2Ftelemetrycleaner&amp;type=date&amp;theme=dark">
+    <img src="https://api.star-history.com/chart?repos=eynnzerr%2Ftelemetrycleaner&amp;type=date" alt="TelemetryCleaner 的 GitHub Star 趋势图">
+  </picture>
+</a>
