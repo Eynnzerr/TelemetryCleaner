@@ -1,9 +1,20 @@
 package com.eynnzerr.telemetrycleaner.data
 
-/** The app's ability to use Shizuku for package operations. */
-enum class ShizukuStatus {
+/** The user's choice of how to authorize package operations. */
+enum class PrivilegeBackend { SHIZUKU, ROOT }
+
+/** The availability of the selected package operation backend. */
+enum class PrivilegeStatus {
     MISSING, STOPPED, PERMISSION_REQUIRED, CONNECTING, READY, ERROR
 }
+
+/**
+ * The backend selected for both manual operations and automatic cleanup.
+ *
+ * @property backend The user's selected authorization method.
+ * @property status The current availability of that method.
+ */
+data class PrivilegeConnection(val backend: PrivilegeBackend, val status: PrivilegeStatus)
 
 /** The carriers served by the preinstalled collection components. */
 enum class Carrier { UNICOM, TELECOM, MOBILE }

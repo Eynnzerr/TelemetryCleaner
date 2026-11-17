@@ -6,16 +6,21 @@ import com.eynnzerr.telemetrycleaner.data.ChangeTarget
 import com.eynnzerr.telemetrycleaner.data.CleanerPreferences
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageState
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
-import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
 
 /** Events in the cleaner's serialized message loop. */
 internal sealed interface CleanerMessage {
     /** Interaction dispatched from the screen. */
     data class Intent(val value: CleanerIntent) : CleanerMessage
 
-    /** Connection status reported by Shizuku. */
-    data class ConnectionChanged(val status: ShizukuStatus) : CleanerMessage
+    /** Connection status reported by the selected backend. */
+    data class ConnectionChanged(val connection: PrivilegeConnection) : CleanerMessage
+
+    /** Reports whether a backend preference was saved and which connection is now current. */
+    data class BackendSelectionFinished(val saved: Boolean, val connection: PrivilegeConnection) : CleanerMessage
 
     /** The scan with [id] completed; [preferences] defines the current operation scope. */
     data class ScanFinished(
@@ -41,17 +46,24 @@ internal sealed interface CleanerMessage {
 
 /** Side effects requested by the reducer and executed by the store. */
 internal sealed interface CleanerEffect {
-    /** Rechecks the availability of Shizuku. */
+    /** Rechecks the availability of the selected backend. */
     data object RefreshConnection : CleanerEffect
 
-    /** Requests authorization from Shizuku. */
+    /** Requests authorization from the selected backend. */
     data object RequestPermission : CleanerEffect
+
+    /** Changes the selected backend and connects to it when required. */
+    data class SelectBackend(val backend: PrivilegeBackend) : CleanerEffect
 
     /** Queries current package and user state. */
     data class Scan(val id: Long) : CleanerEffect
 
-    /** Runs the confirmed package operation. */
-    data class Change(val id: Long, val confirmation: CleanerPanel.Confirmation) : CleanerEffect
+    /** Runs the confirmed package operation with the backend shown at confirmation. */
+    data class Change(
+        val id: Long,
+        val confirmation: CleanerPanel.Confirmation,
+        val backend: PrivilegeBackend,
+    ) : CleanerEffect
 }
 
 /**
@@ -65,19 +77,22 @@ internal data class CleanerTransition(
     val scopeToSave: Set<Long>? = null,
 )
 
-/** Computes screen transitions without accessing Shizuku or performing I/O. */
+/** Computes screen transitions without accessing a privilege backend or performing I/O. */
 internal object CleanerReducer {
     /** Reduces one user intent or work result against the latest [state]. */
     fun reduce(state: CleanerState, message: CleanerMessage): CleanerTransition = when (message) {
         is CleanerMessage.Intent -> reduceIntent(state, message.value)
-        is CleanerMessage.ConnectionChanged -> connectionChanged(state, message.status)
+        is CleanerMessage.ConnectionChanged -> connectionChanged(state, message.connection)
+        is CleanerMessage.BackendSelectionFinished -> backendSelectionFinished(state, message)
         is CleanerMessage.ScanFinished -> scanFinished(state, message)
         is CleanerMessage.ScanFailed -> CleanerTransition(
             if (state.isCurrentScan(message.id)) state.copy(activity = CleanerActivity.IDLE, error = message.error)
             else state,
         )
         CleanerMessage.AutomaticChanges -> {
-            if (state.connection == ShizukuStatus.READY && state.activity != CleanerActivity.CHANGING) {
+            if (state.connection.status == PrivilegeStatus.READY &&
+                state.activity != CleanerActivity.CHANGING && state.activity != CleanerActivity.SWITCHING_BACKEND
+            ) {
                 startScan(state)
             } else {
                 CleanerTransition(state)
@@ -92,12 +107,13 @@ internal object CleanerReducer {
             CleanerIntent.Refresh -> refresh(state)
             CleanerIntent.RequestPermission -> CleanerTransition(
                 state,
-                if (state.connection == ShizukuStatus.PERMISSION_REQUIRED) {
+                if (state.activity == CleanerActivity.IDLE && state.connection.canRequestPermission()) {
                     listOf(CleanerEffect.RequestPermission)
                 } else {
                     emptyList()
                 },
             )
+            is CleanerIntent.SelectBackend -> selectBackend(state, intent.backend)
             is CleanerIntent.ToggleSpace -> toggleSpace(state, intent.userId)
             is CleanerIntent.TogglePackage -> togglePackage(state, intent.packageName)
             CleanerIntent.ToggleAllPackages -> toggleAllPackages(state)
@@ -107,33 +123,72 @@ internal object CleanerReducer {
             CleanerIntent.DismissPanel -> CleanerTransition(state.copy(panel = null))
         }
 
-    /** Rechecks the service and refreshes an already connected screen. */
+    /** Rechecks the backend and refreshes an already connected screen. */
     private fun refresh(state: CleanerState): CleanerTransition {
-        if (state.connection != ShizukuStatus.READY) {
+        if (state.activity != CleanerActivity.IDLE) return CleanerTransition(state)
+        if (state.connection.status != PrivilegeStatus.READY) {
             return CleanerTransition(state, listOf(CleanerEffect.RefreshConnection))
         }
-        if (state.activity != CleanerActivity.IDLE) return CleanerTransition(state)
         val transition = startScan(state)
         return transition.copy(effects = listOf(CleanerEffect.RefreshConnection) + transition.effects)
     }
 
-    /** Invalidates scans and unsubmitted confirmations from an earlier connection. */
-    private fun connectionChanged(state: CleanerState, status: ShizukuStatus): CleanerTransition {
-        if (state.connection == status) return CleanerTransition(state)
-        val connectedState = state.copy(connection = status)
-        if (status == ShizukuStatus.READY) {
-            return if (state.activity == CleanerActivity.CHANGING) {
-                CleanerTransition(connectedState)
-            } else {
-                startScan(connectedState)
-            }
-        }
+    /** Allows explicit Root reconnects and Shizuku's permission prompt. */
+    private fun PrivilegeConnection.canRequestPermission(): Boolean = when (backend) {
+        PrivilegeBackend.SHIZUKU -> status == PrivilegeStatus.PERMISSION_REQUIRED
+        PrivilegeBackend.ROOT -> status != PrivilegeStatus.READY && status != PrivilegeStatus.CONNECTING
+    }
 
-        val withoutConfirmation = connectedState.copy(panel = connectedState.panel.withoutConfirmation())
-        if (state.activity != CleanerActivity.SCANNING) return CleanerTransition(withoutConfirmation)
+    /** Blocks package actions until the selected backend is saved and any connection attempt finishes. */
+    private fun selectBackend(state: CleanerState, backend: PrivilegeBackend): CleanerTransition {
+        if (state.activity != CleanerActivity.IDLE || state.connection.status == PrivilegeStatus.CONNECTING ||
+            state.connection.backend == backend
+        ) {
+            return CleanerTransition(state)
+        }
         return CleanerTransition(
-            withoutConfirmation.copy(activity = CleanerActivity.IDLE, workId = state.workId + 1),
+            state.copy(activity = CleanerActivity.SWITCHING_BACKEND, panel = null, error = null),
+            listOf(CleanerEffect.SelectBackend(backend)),
         )
+    }
+
+    /** Reconciles a completed selection with the latest connection and scans if it is ready. */
+    private fun backendSelectionFinished(
+        state: CleanerState,
+        message: CleanerMessage.BackendSelectionFinished,
+    ): CleanerTransition {
+        val connectedState = connectionChanged(state, message.connection).state.copy(
+            activity = CleanerActivity.IDLE,
+            error = if (message.saved) null else CleanerError.BACKEND_SELECTION_FAILED,
+        )
+        return if (message.saved && connectedState.connection.status == PrivilegeStatus.READY) {
+            startScan(connectedState)
+        } else {
+            CleanerTransition(connectedState)
+        }
+    }
+
+    /** Invalidates scans and unsubmitted confirmations from an earlier connection. */
+    private fun connectionChanged(state: CleanerState, connection: PrivilegeConnection): CleanerTransition {
+        if (state.connection == connection) return CleanerTransition(state)
+        val connectedState = if (state.connection.backend == connection.backend) {
+            state.copy(connection = connection, panel = state.panel.withoutConfirmation())
+        } else {
+            state.copy(
+                connection = connection,
+                snapshot = null,
+                selectedUserIds = emptySet(),
+                selectedPackageNames = emptySet(),
+                panel = null,
+                error = null,
+            )
+        }
+        if (state.activity == CleanerActivity.CHANGING || state.activity == CleanerActivity.SWITCHING_BACKEND) {
+            return CleanerTransition(connectedState)
+        }
+        if (connection.status == PrivilegeStatus.READY) return startScan(connectedState)
+        if (state.activity != CleanerActivity.SCANNING) return CleanerTransition(connectedState)
+        return CleanerTransition(connectedState.copy(activity = CleanerActivity.IDLE, workId = state.workId + 1))
     }
 
     /** Starts a scan and closes any action preview based on the previous scan. */
@@ -249,7 +304,7 @@ internal object CleanerReducer {
                 selectedPackageNames = emptySet(),
                 workId = id,
             ),
-            listOf(CleanerEffect.Change(id, confirmation)),
+            listOf(CleanerEffect.Change(id, confirmation, state.connection.backend)),
         )
     }
 
@@ -266,7 +321,7 @@ internal object CleanerReducer {
             activity = CleanerActivity.IDLE,
             error = if (message.requestFailed) CleanerError.ACTION_FAILED else null,
         )
-        return if (state.connection == ShizukuStatus.READY) {
+        return if (state.connection.status == PrivilegeStatus.READY) {
             startScan(finished)
         } else {
             CleanerTransition(finished)

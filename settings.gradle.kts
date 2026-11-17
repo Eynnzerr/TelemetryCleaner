@@ -19,6 +19,14 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        exclusiveContent {
+            forRepository {
+                maven("https://jitpack.io")
+            }
+            filter {
+                includeModule("com.github.topjohnwu.libsu", "core")
+            }
+        }
     }
 }
 

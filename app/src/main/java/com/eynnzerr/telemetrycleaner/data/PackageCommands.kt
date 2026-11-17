@@ -38,21 +38,12 @@ internal sealed interface PackageReading {
 /** Indicates why the user spaces needed to start a scan could not be determined. */
 internal class UserListScanException(val issue: PackageScanIssue) : Exception()
 
-/** Queries and changes only catalogued carrier packages through the Android shell. */
-internal object PackageCommands {
-    private val packageHeader = Regex("""^ {2}Package \[([^\]]+)](?: \([^)]*\))?:.*$""")
-    private val userHeader = Regex("""^\s+User (\d+):\s+(.*)$""")
-    private val listedUser = Regex("""^\s*UserInfo\{(\d+):(.*):[a-fA-F0-9]+\}.*$""")
-    private val installedFlag = Regex("""\binstalled=(true|false)\b""")
-    private val enabledFlag = Regex("""\benabled=(\d+)\b""")
-    private val versionCode = Regex("""^versionCode=(\d+)\b""")
-
-    /** Total time allowed for an app_process deletion to appear in the package dump. */
-    private const val RETRY_VERIFY_TIMEOUT_MS = 3_000L
-
-    /** Delay between package dumps while waiting for an app_process deletion. */
-    private const val RETRY_VERIFY_INTERVAL_MS = 150L
-
+/**
+ * Queries and changes only catalogued carrier packages through the selected connection.
+ *
+ * @property executor The connection used for every read and write within the operation.
+ */
+internal class PackageCommands(private val executor: PackageExecutor) {
     /** Resolves the requested catalogue variants and their states in each visible Android user. */
     suspend fun scan(callerUser: Int, packageNames: Set<String>, permissionManager: PackageManager?): ScanSnapshot {
         val users = listUsers()
@@ -107,7 +98,7 @@ internal object PackageCommands {
     /** Returns the package-manager users visible to the service. */
     private fun listUsers(): List<AndroidUser> {
         val result = query({ throw UserListScanException(it) }) {
-            PackageBinder.execute(listOf("list", "users"))
+            executor.execute(listOf("list", "users"))
         }
         result.queryIssue()?.let { throw UserListScanException(it) }
         val users = result.output.lineSequence().mapNotNull { line ->
@@ -122,9 +113,12 @@ internal object PackageCommands {
 
     /** Reads the exact package directly because some ROMs omit it from package lists. */
     private fun read(packageName: String, permissionManager: PackageManager? = null): PackageReading {
-        val direct = readDump(packageName, permissionManager) { PackageBinder.execute(listOf("dump", packageName)) }
+        if (!executor.prefersShellDump) {
+            return readDump(packageName, permissionManager) { executor.dump(packageName) }
+        }
+        val direct = readDump(packageName, permissionManager) { executor.execute(listOf("dump", packageName)) }
         if (direct !is PackageReading.Unavailable) return direct
-        val fallback = readDump(packageName, permissionManager) { PackageBinder.dump(packageName) }
+        val fallback = readDump(packageName, permissionManager) { executor.dump(packageName) }
         if (fallback !is PackageReading.Unavailable) return fallback
         return when {
             direct.issue == PackageScanIssue.PERMISSION_DENIED -> direct
@@ -133,7 +127,7 @@ internal object PackageCommands {
         }
     }
 
-    /** Converts Binder transport failures to a reason before parsing the package response. */
+    /** Converts transport failures to a reason before parsing the package response. */
     private inline fun readDump(
         packageName: String,
         permissionManager: PackageManager?,
@@ -191,7 +185,7 @@ internal object PackageCommands {
         captureDenialLog: Boolean,
         disableOnUninstallFailure: Boolean,
         canSubmit: suspend () -> Boolean = { true },
-        deleteThroughAppProcess: (String, Int) -> PackageFallbackResult,
+        deleteThroughAppProcess: ((String, Int) -> PackageFallbackResult)? = null,
     ): ChangeOutcome {
         val packageName = target.packageName
         if (packageName !in PackageDirectory.variants) {
@@ -248,7 +242,10 @@ internal object PackageCommands {
             return ChangeOutcome(target, true, null)
         }
 
-        val fallback = if (action == PackageAction.UNINSTALL && post != null && post != PackageState.UNKNOWN) {
+        val fallback = if (deleteThroughAppProcess != null && action == PackageAction.UNINSTALL &&
+            post != null && post != PackageState.UNKNOWN && canSubmit()
+        ) {
+            currentCoroutineContext().ensureActive()
             deleteThroughAppProcess(packageName, target.userId)
         } else {
             null
@@ -266,7 +263,8 @@ internal object PackageCommands {
             val enabled = current.enabledFor(target.userId)
             if (currentState == PackageState.INSTALLED &&
                 (enabled == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT ||
-                    enabled == PackageManager.COMPONENT_ENABLED_STATE_ENABLED)
+                    enabled == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) &&
+                canSubmit()
             ) {
                 currentCoroutineContext().ensureActive()
                 disableAttempt = executeChange(listOf("disable-user", "--user", userId, packageName))
@@ -289,7 +287,7 @@ internal object PackageCommands {
             (result != null && (result.exitCode > 0 || result.systemErrorLine() != null))
         val denialLog = if (captureDenialLog && (rejected || disableAttempt != null)) {
             PackageDiagnostics.uninstallDenial(
-                target, record, state, post, startedAt, attempt, fallback, disableAttempt, afterDisable,
+                executor, target, record, state, post, startedAt, attempt, fallback, disableAttempt, afterDisable,
             )
         } else {
             null
@@ -304,7 +302,7 @@ internal object PackageCommands {
 
     /** Keeps a package-service failure available for verification and diagnostics. */
     private fun executeChange(command: List<String>): Result<PackageShellResult> = try {
-        Result.success(PackageBinder.execute(command))
+        Result.success(executor.execute(command))
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (failure: Exception) {
@@ -450,5 +448,20 @@ internal object PackageCommands {
                 users
             },
         )
+    }
+
+    private companion object {
+        val packageHeader = Regex("""^ {2}Package \[([^\]]+)](?: \([^)]*\))?:.*$""")
+        val userHeader = Regex("""^\s+User (\d+):\s+(.*)$""")
+        val listedUser = Regex("""^\s*UserInfo\{(\d+):(.*):[a-fA-F0-9]+\}.*$""")
+        val installedFlag = Regex("""\binstalled=(true|false)\b""")
+        val enabledFlag = Regex("""\benabled=(\d+)\b""")
+        val versionCode = Regex("""^versionCode=(\d+)\b""")
+
+        /** Total time allowed for an app_process deletion to appear in the package dump. */
+        const val RETRY_VERIFY_TIMEOUT_MS = 3_000L
+
+        /** Delay between package dumps while waiting for an app_process deletion. */
+        const val RETRY_VERIFY_INTERVAL_MS = 150L
     }
 }

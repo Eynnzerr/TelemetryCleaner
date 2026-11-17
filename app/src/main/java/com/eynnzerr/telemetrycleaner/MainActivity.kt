@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
                                 var releaseResult by remember { mutableStateOf<ReleaseCheckResult?>(null) }
                                 SettingsScreen(
                                     state = state.value,
+                                    onSelectBackend = { cleanerViewModel.dispatch(CleanerIntent.SelectBackend(it)) },
                                     autoCleanupEnabled = savedPreferences?.autoCleanupEnabled,
                                     autoCleanupStatus = autoCleanupStatus.value,
                                     autoCleanupIntervalMinutes = savedPreferences?.autoCleanupIntervalMinutes

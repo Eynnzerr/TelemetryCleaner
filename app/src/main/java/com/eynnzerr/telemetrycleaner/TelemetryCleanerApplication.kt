@@ -15,12 +15,12 @@ import org.koin.dsl.module
 /** One device-local Preferences DataStore for settings and automatic cleanup history. */
 private val Context.cleanerDataStore by preferencesDataStore(name = "cleaner_settings")
 
-/** Shares persisted settings and provides a separate Shizuku listener owner for each client. */
+/** Shares settings, the selected backend and its session across the screen and foreground service. */
 private val cleanerModule = module {
     single { androidContext().cleanerDataStore }
     single { CleanerSettings(get()) }
     single { AutoCleanupHistoryStore(get()) }
-    factory { CleanerRepository(androidContext()) }
+    single { CleanerRepository(androidContext(), get()) }
     viewModelOf(::CleanerViewModel)
 }
 

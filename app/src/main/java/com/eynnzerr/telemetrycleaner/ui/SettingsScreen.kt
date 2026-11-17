@@ -38,6 +38,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -68,8 +69,11 @@ import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.AndroidUser
 import com.eynnzerr.telemetrycleaner.data.AutoCleanupStatus
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.ThemePalette
 import com.eynnzerr.telemetrycleaner.feature.CleanerActivity
+import com.eynnzerr.telemetrycleaner.feature.CleanerError
 import com.eynnzerr.telemetrycleaner.feature.CleanerState
 import com.eynnzerr.telemetrycleaner.ui.theme.TelemetryCleanerTheme
 import com.eynnzerr.telemetrycleaner.ui.theme.swatchColor
@@ -79,6 +83,7 @@ import com.eynnzerr.telemetrycleaner.ui.theme.swatchColor
 @Composable
 internal fun SettingsScreen(
     state: CleanerState,
+    onSelectBackend: (PrivilegeBackend) -> Unit,
     autoCleanupEnabled: Boolean?,
     autoCleanupStatus: AutoCleanupStatus,
     autoCleanupIntervalMinutes: Int,
@@ -124,6 +129,7 @@ internal fun SettingsScreen(
                     .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                PrivilegeBackendSettings(state, onSelectBackend)
                 ScopeSettings(state, onToggleSpace)
                 SettingsGroup(stringResource(R.string.settings_group_cleanup)) {
                     DisableOnUninstallFailureSetting(
@@ -186,6 +192,49 @@ internal fun SettingsScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+/** Lets the user select the same privilege backend for foreground and background operations. */
+@Composable
+private fun PrivilegeBackendSettings(state: CleanerState, onSelect: (PrivilegeBackend) -> Unit) {
+    val enabled = state.activity == CleanerActivity.IDLE && state.connection.status != PrivilegeStatus.CONNECTING
+    SettingsGroup(stringResource(R.string.settings_privilege_backend)) {
+        Column(Modifier.selectableGroup()) {
+            PrivilegeBackend.entries.forEach { backend ->
+                val selected = state.connection.backend == backend
+                val name = when (backend) {
+                    PrivilegeBackend.SHIZUKU -> R.string.backend_shizuku
+                    PrivilegeBackend.ROOT -> R.string.backend_root
+                }
+                ListItem(
+                    headlineContent = { Text(stringResource(name)) },
+                    supportingContent = if (selected && backend == PrivilegeBackend.ROOT &&
+                        state.connection.status != PrivilegeStatus.READY
+                    ) {
+                        { Text(stringResource(state.connection.statusLabel())) }
+                    } else {
+                        null
+                    },
+                    trailingContent = { RadioButton(selected = selected, onClick = null, enabled = enabled) },
+                    modifier = Modifier.selectable(
+                        selected = selected,
+                        enabled = enabled,
+                        role = Role.RadioButton,
+                        onClick = { onSelect(backend) },
+                    ),
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+        }
+        if (state.error == CleanerError.BACKEND_SELECTION_FAILED) {
+            Text(
+                text = stringResource(R.string.backend_selection_failed),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
         }
     }
 }
@@ -597,6 +646,7 @@ internal fun AutoCleanupStatus.label(): Int = when (this) {
     AutoCleanupStatus.OFF -> R.string.auto_cleanup_off
     AutoCleanupStatus.STARTING -> R.string.auto_cleanup_starting
     AutoCleanupStatus.WAITING_FOR_SHIZUKU -> R.string.auto_cleanup_waiting_for_shizuku
+    AutoCleanupStatus.WAITING_FOR_ROOT -> R.string.auto_cleanup_waiting_for_root
     AutoCleanupStatus.CHECKING -> R.string.auto_cleanup_checking
     AutoCleanupStatus.MONITORING -> R.string.auto_cleanup_monitoring
     AutoCleanupStatus.NO_SPACES -> R.string.scope_empty

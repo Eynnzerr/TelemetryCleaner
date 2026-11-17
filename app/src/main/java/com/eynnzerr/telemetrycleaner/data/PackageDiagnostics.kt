@@ -12,6 +12,7 @@ internal object PackageDiagnostics {
 
     /** Formats diagnostics for one target whose uninstall did not succeed. */
     fun uninstallDenial(
+        executor: PackageExecutor,
         target: ChangeTarget,
         record: PackageRecord,
         before: PackageState,
@@ -39,8 +40,10 @@ internal object PackageDiagnostics {
             appendAttempt("Disable fallback", disableAttempt)
             appendLine("State after disable request: ${afterDisable ?: "unknown"}")
         }
-        appendLine("Related system log:")
-        append(readSystemLog(target.packageName, startedAt))
+        executor.systemLog(target.packageName, startedAt)?.let { log ->
+            appendLine("Related system log:")
+            append(log)
+        }
     }
 
     /** Writes the service output or exception from a single package command. */
@@ -55,7 +58,7 @@ internal object PackageDiagnostics {
     }
 
     /** Reads bounded system-UID messages matching this package or the uninstall restriction. */
-    private fun readSystemLog(packageName: String, startedAt: Long): String {
+    fun readShizukuSystemLog(packageName: String, startedAt: Long): String {
         val since = String.format(Locale.ROOT, "%d.%03d", startedAt / 1_000, startedAt % 1_000)
         val exactPackage = packageName.replace(".", "\\.")
         val filter = "(^|[^a-zA-Z0-9_.])$exactPackage($|[^a-zA-Z0-9_.])|User is restricted: no_uninstall_apps"

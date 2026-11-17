@@ -96,8 +96,10 @@ import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
 import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
-import com.eynnzerr.telemetrycleaner.data.ShizukuStatus
 import com.eynnzerr.telemetrycleaner.feature.CleanerActivity
 import com.eynnzerr.telemetrycleaner.feature.CleanerError
 import com.eynnzerr.telemetrycleaner.feature.CleanerIntent
@@ -155,6 +157,7 @@ fun CleanerScreen(
                                         CleanerError.SCAN_SPACE_RESPONSE_INVALID -> R.string.scan_space_response_invalid
                                         CleanerError.SCAN_CURRENT_SPACE_MISSING -> R.string.scan_current_space_missing
                                         CleanerError.ACTION_FAILED -> R.string.action_failed
+                                        CleanerError.BACKEND_SELECTION_FAILED -> R.string.backend_selection_failed
                                     },
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,
@@ -234,22 +237,27 @@ internal fun CleanerTopBar(
     )
 }
 
+/** Shows the selected privilege backend, its next action, and the scan summary. */
 @Composable
 private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val snapshot = state.snapshot
-    val busy = state.activity != CleanerActivity.IDLE || state.connection == ShizukuStatus.CONNECTING
+    val (backend, status) = state.connection
+    val isRoot = backend == PrivilegeBackend.ROOT
+    val ready = status == PrivilegeStatus.READY
+    val busy = state.activity != CleanerActivity.IDLE || status == PrivilegeStatus.CONNECTING
     val hasIncompleteResults = snapshot?.packages?.any { result ->
         state.selectedUserIds.any { result.hasUnresolvedStatus(it) }
     } == true
     val summaryTitle = when {
+        state.activity == CleanerActivity.SWITCHING_BACKEND -> stringResource(R.string.switching_backend)
         state.activity == CleanerActivity.CHANGING -> stringResource(R.string.changing)
         state.activity == CleanerActivity.SCANNING -> stringResource(R.string.scanning)
-        state.connection == ShizukuStatus.READY && snapshot != null && state.selectedUserIds.isEmpty() -> {
+        ready && snapshot != null && state.selectedUserIds.isEmpty() -> {
             stringResource(R.string.scope_empty)
         }
-        state.connection == ShizukuStatus.READY && snapshot != null -> {
+        ready && snapshot != null -> {
             val count = snapshot.packages.count { result ->
                 result.entry.carriers.isNotEmpty() && state.selectedUserIds.any { userId ->
                     result.users[userId] == PackageState.INSTALLED ||
@@ -259,29 +267,29 @@ private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) 
             if (count == 0 && hasIncompleteResults) stringResource(R.string.summary_scan_incomplete)
             else pluralStringResource(R.plurals.installed_components, count, count)
         }
-        state.connection == ShizukuStatus.READY && state.error != null ->
-            stringResource(R.string.scan_unavailable)
-        else -> stringResource(
-            when (state.connection) {
-                ShizukuStatus.MISSING -> R.string.shizuku_missing
-                ShizukuStatus.STOPPED -> R.string.shizuku_stopped
-                ShizukuStatus.PERMISSION_REQUIRED -> R.string.shizuku_permission
-                ShizukuStatus.CONNECTING -> R.string.scan_preparing
-                ShizukuStatus.ERROR -> R.string.scan_unavailable
-                ShizukuStatus.READY -> R.string.scan_ready
-            },
-        )
+        ready && state.error == null -> stringResource(R.string.scan_ready)
+        status == PrivilegeStatus.CONNECTING -> stringResource(R.string.scan_preparing)
+        !isRoot && status == PrivilegeStatus.MISSING -> stringResource(R.string.shizuku_missing)
+        !isRoot && status == PrivilegeStatus.STOPPED -> stringResource(R.string.shizuku_stopped)
+        !isRoot && status == PrivilegeStatus.PERMISSION_REQUIRED -> stringResource(R.string.shizuku_permission)
+        else -> stringResource(R.string.scan_unavailable)
     }
-    val subtitle = when {
-        state.activity != CleanerActivity.IDLE -> null
-        state.connection == ShizukuStatus.MISSING -> R.string.setup_explanation
-        state.connection == ShizukuStatus.STOPPED -> R.string.start_explanation
-        state.connection == ShizukuStatus.PERMISSION_REQUIRED -> R.string.permission_explanation
-        state.connection == ShizukuStatus.CONNECTING -> R.string.waiting_for_shizuku
-        snapshot == null && state.connection == ShizukuStatus.READY && state.error == null ->
-            R.string.scan_ready_description
-        state.connection == ShizukuStatus.READY && hasIncompleteResults -> R.string.summary_scan_incomplete_description
-        else -> null
+    val subtitle = if (state.activity == CleanerActivity.IDLE) {
+        when (status) {
+            PrivilegeStatus.MISSING -> if (isRoot) R.string.root_setup_explanation else R.string.setup_explanation
+            PrivilegeStatus.STOPPED -> if (isRoot) null else R.string.start_explanation
+            PrivilegeStatus.PERMISSION_REQUIRED ->
+                if (isRoot) R.string.root_permission_explanation else R.string.permission_explanation
+            PrivilegeStatus.CONNECTING -> if (isRoot) null else R.string.waiting_for_shizuku
+            PrivilegeStatus.ERROR -> if (isRoot) R.string.root_error_explanation else null
+            PrivilegeStatus.READY -> when {
+                snapshot == null && state.error == null -> R.string.scan_ready_description
+                hasIncompleteResults -> R.string.summary_scan_incomplete_description
+                else -> null
+            }
+        }
+    } else {
+        null
     }
 
     Surface(
@@ -296,16 +304,7 @@ private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = stringResource(
-                            when (state.connection) {
-                                ShizukuStatus.MISSING -> R.string.shizuku_not_installed
-                                ShizukuStatus.STOPPED -> R.string.shizuku_disconnected
-                                ShizukuStatus.PERMISSION_REQUIRED -> R.string.shizuku_unauthorized
-                                ShizukuStatus.CONNECTING -> R.string.shizuku_connecting
-                                ShizukuStatus.READY -> R.string.shizuku_connected
-                                ShizukuStatus.ERROR -> R.string.shizuku_error
-                            },
-                        ),
+                        text = stringResource(state.connection.statusLabel()),
                         style = MaterialTheme.typography.labelLargeEmphasized,
                     )
                     Text(
@@ -331,28 +330,65 @@ private fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) 
             if (subtitle != null) {
                 Text(stringResource(subtitle), style = MaterialTheme.typography.bodyMedium)
             }
-            if (!busy) {
-                when (state.connection) {
-                    ShizukuStatus.MISSING -> ExpressiveButton(R.string.get_shizuku) {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_SETUP_URL)))
+            if (!busy && !ready) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when {
+                        isRoot -> ExpressiveButton(
+                            when (status) {
+                                PrivilegeStatus.STOPPED -> R.string.connect_root
+                                PrivilegeStatus.PERMISSION_REQUIRED -> R.string.authorize
+                                else -> R.string.try_again
+                            },
+                        ) {
+                            onIntent(CleanerIntent.RequestPermission)
+                        }
+                        status == PrivilegeStatus.MISSING -> ExpressiveButton(R.string.get_shizuku) {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_SETUP_URL)))
+                        }
+                        status == PrivilegeStatus.STOPPED -> ExpressiveButton(R.string.open_shizuku) {
+                            val launch = context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
+                            context.startActivity(launch ?: Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_SETUP_URL)))
+                        }
+                        status == PrivilegeStatus.PERMISSION_REQUIRED -> ExpressiveButton(R.string.authorize) {
+                            onIntent(CleanerIntent.RequestPermission)
+                        }
+                        status == PrivilegeStatus.ERROR -> ExpressiveButton(R.string.try_again) {
+                            onIntent(CleanerIntent.Refresh)
+                        }
                     }
-                    ShizukuStatus.STOPPED -> ExpressiveButton(R.string.open_shizuku) {
-                        val launch = context.packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
-                        context.startActivity(launch ?: Intent(Intent.ACTION_VIEW, Uri.parse(SHIZUKU_SETUP_URL)))
+                    val alternative = if (isRoot) PrivilegeBackend.SHIZUKU else PrivilegeBackend.ROOT
+                    TextButton(onClick = { onIntent(CleanerIntent.SelectBackend(alternative)) }) {
+                        Text(stringResource(if (isRoot) R.string.use_shizuku else R.string.use_root))
                     }
-                    ShizukuStatus.PERMISSION_REQUIRED -> ExpressiveButton(R.string.authorize) {
-                        onIntent(CleanerIntent.RequestPermission)
-                    }
-                    ShizukuStatus.ERROR -> ExpressiveButton(R.string.try_again) {
-                        onIntent(CleanerIntent.Refresh)
-                    }
-                    ShizukuStatus.READY -> if (snapshot == null && state.error == null) {
-                        ExpressiveButton(R.string.scan) { onIntent(CleanerIntent.Refresh) }
-                    }
-                    ShizukuStatus.CONNECTING -> Unit
                 }
+            } else if (!busy && snapshot == null && state.error == null) {
+                ExpressiveButton(R.string.scan) { onIntent(CleanerIntent.Refresh) }
             }
         }
+    }
+}
+
+/** Returns the connection label for the active privilege backend. */
+@StringRes
+internal fun PrivilegeConnection.statusLabel(): Int = when (backend) {
+    PrivilegeBackend.SHIZUKU -> when (status) {
+        PrivilegeStatus.MISSING -> R.string.shizuku_not_installed
+        PrivilegeStatus.STOPPED -> R.string.shizuku_disconnected
+        PrivilegeStatus.PERMISSION_REQUIRED -> R.string.shizuku_unauthorized
+        PrivilegeStatus.CONNECTING -> R.string.shizuku_connecting
+        PrivilegeStatus.READY -> R.string.shizuku_connected
+        PrivilegeStatus.ERROR -> R.string.shizuku_error
+    }
+    PrivilegeBackend.ROOT -> when (status) {
+        PrivilegeStatus.MISSING -> R.string.root_missing
+        PrivilegeStatus.STOPPED -> R.string.root_disconnected
+        PrivilegeStatus.PERMISSION_REQUIRED -> R.string.root_unauthorized
+        PrivilegeStatus.CONNECTING -> R.string.root_connecting
+        PrivilegeStatus.READY -> R.string.root_connected
+        PrivilegeStatus.ERROR -> R.string.root_error
     }
 }
 
@@ -368,7 +404,7 @@ private fun CarrierSectionHeading(state: CleanerState, onIntent: (CleanerIntent)
     ) {
         Text(
             text = stringResource(
-                if (state.connection == ShizukuStatus.READY && state.error == null) {
+                if (state.connection.status == PrivilegeStatus.READY && state.error == null) {
                     R.string.section_components
                 } else {
                     R.string.section_previous_results

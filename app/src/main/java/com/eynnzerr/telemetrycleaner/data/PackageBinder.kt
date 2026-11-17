@@ -12,17 +12,16 @@ import java.util.concurrent.TimeUnit
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 
-/** Output and completion status of a package manager request. */
-internal data class PackageShellResult(val exitCode: Int, val output: String)
-
 /** Calls the package service under Shizuku's identity using Android's Binder command protocol. */
-internal object PackageBinder {
+internal object PackageBinder : PackageExecutor {
+    override val prefersShellDump = true
+
     // IBinder.SHELL_COMMAND_TRANSACTION is hidden from the public SDK. Its wire code is '_CMD'.
     private const val SHELL_COMMAND_TRANSACTION = 0x5f434d44
     private const val RESULT_TIMEOUT_SECONDS = 5L
 
     /** Runs the fixed package arguments supplied by [PackageCommands] off the main thread. */
-    fun execute(args: List<String>): PackageShellResult {
+    override fun execute(args: List<String>): PackageShellResult {
         val result = CommandResult()
         val output = ParcelFileDescriptor.open(File("/dev/null"), ParcelFileDescriptor.MODE_READ_ONLY).use { input ->
             captureOutput(SHELL_COMMAND_TRANSACTION) { descriptor ->
@@ -40,13 +39,17 @@ internal object PackageBinder {
     }
 
     /** Reads the exact package via the package service's dumpsys interface. */
-    fun dump(packageName: String): PackageShellResult {
+    override fun dump(packageName: String): PackageShellResult {
         val output = captureOutput(IBinder.DUMP_TRANSACTION) { descriptor ->
             writeFileDescriptor(descriptor.fileDescriptor)
             writeStringArray(arrayOf(packageName))
         }
         return PackageShellResult(0, output)
     }
+
+    /** Collects nearby system logs through the same Shizuku connection. */
+    override fun systemLog(packageName: String, startedAt: Long): String =
+        PackageDiagnostics.readShizukuSystemLog(packageName, startedAt)
 
     /** Drains the pipe during the synchronous transaction so large dumps cannot block Binder. */
     private fun captureOutput(

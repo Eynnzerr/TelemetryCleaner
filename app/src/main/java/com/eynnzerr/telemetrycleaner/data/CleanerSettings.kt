@@ -36,6 +36,7 @@ internal const val DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES = 30
  * @property themePalette The saved color palette for the app.
  * @property autoCleanupIntervalMinutes The number of minutes between automatic checks.
  * @property disableOnUninstallFailure Whether a failed manual uninstall may fall back to disabling the package.
+ * @property privilegeBackend The authorization method to use for package operations.
  */
 internal data class CleanerPreferences(
     val autoCleanupEnabled: Boolean,
@@ -43,6 +44,7 @@ internal data class CleanerPreferences(
     val themePalette: ThemePalette = ThemePalette.SYSTEM,
     val autoCleanupIntervalMinutes: Int = DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES,
     val disableOnUninstallFailure: Boolean = true,
+    val privilegeBackend: PrivilegeBackend = PrivilegeBackend.SHIZUKU,
 ) {
     /** Defaults to the current user only until the user explicitly picks a scope. */
     fun selectedUsers(snapshot: ScanSnapshot): Set<Int> =
@@ -57,7 +59,7 @@ internal data class CleanerPreferences(
 
 /** The foreground service's current availability and most recent check state. */
 internal enum class AutoCleanupStatus {
-    OFF, STARTING, WAITING_FOR_SHIZUKU, CHECKING, MONITORING, NO_SPACES, CHECK_FAILED, START_FAILED
+    OFF, STARTING, WAITING_FOR_SHIZUKU, WAITING_FOR_ROOT, CHECKING, MONITORING, NO_SPACES, CHECK_FAILED, START_FAILED
 }
 
 /** Persists cleaner settings and exposes the live service status. */
@@ -76,6 +78,11 @@ internal class CleanerSettings(private val store: DataStore<Preferences>) {
                 autoCleanupIntervalMinutes = saved[AUTO_CLEANUP_INTERVAL_MINUTES]?.takeIf { it > 0 }
                     ?: DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES,
                 disableOnUninstallFailure = saved[DISABLE_ON_UNINSTALL_FAILURE] ?: true,
+                privilegeBackend = if (saved[PRIVILEGE_BACKEND] == PrivilegeBackend.ROOT.name) {
+                    PrivilegeBackend.ROOT
+                } else {
+                    PrivilegeBackend.SHIZUKU
+                },
             )
         }
         .catch { failure ->
@@ -107,6 +114,10 @@ internal class CleanerSettings(private val store: DataStore<Preferences>) {
     /** Saves the preference for disabling a package after a failed manual uninstall. */
     suspend fun setDisableOnUninstallFailure(enabled: Boolean): Boolean =
         save { it[DISABLE_ON_UNINSTALL_FAILURE] = enabled }
+
+    /** Saves the backend selected by the user. */
+    suspend fun setPrivilegeBackend(backend: PrivilegeBackend): Boolean =
+        save { it[PRIVILEGE_BACKEND] = backend.name }
 
     /** Saves a positive interval in whole minutes when automatic cleanup is enabled. */
     suspend fun setAutoCleanupInterval(minutes: Int): Boolean {
@@ -155,6 +166,9 @@ internal class CleanerSettings(private val store: DataStore<Preferences>) {
 
         /** Whether to try disabling a package when manual uninstall fails. */
         val DISABLE_ON_UNINSTALL_FAILURE = booleanPreferencesKey("disable_on_uninstall_failure")
+
+        /** The selected authorization method. */
+        val PRIVILEGE_BACKEND = stringPreferencesKey("privilege_backend")
 
         /** The user's automatic check interval in minutes. */
         val AUTO_CLEANUP_INTERVAL_MINUTES = intPreferencesKey("auto_cleanup_interval_minutes")
