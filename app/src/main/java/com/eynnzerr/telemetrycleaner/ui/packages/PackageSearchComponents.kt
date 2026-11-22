@@ -1,12 +1,16 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
 package com.eynnzerr.telemetrycleaner.ui.packages
 
 import android.content.pm.PackageManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -14,19 +18,21 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
@@ -37,14 +43,18 @@ import com.eynnzerr.telemetrycleaner.feature.packages.PackageDetailsUiState
 import com.eynnzerr.telemetrycleaner.ui.components.CleanerModalSheet
 import com.eynnzerr.telemetrycleaner.ui.components.PackageLoadingIndicator
 import com.eynnzerr.telemetrycleaner.ui.components.PackageNameText
+import com.eynnzerr.telemetrycleaner.ui.components.StatusBadge
+import com.eynnzerr.telemetrycleaner.ui.components.StatusTone
+import com.eynnzerr.telemetrycleaner.ui.components.rememberAnimatedSegmentedShape
+import com.eynnzerr.telemetrycleaner.ui.components.segmentedContainerColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Centers the loading indicator in the space available for search results. */
+/** Centers the Expressive contained loading indicator while package inventory loads. */
 @Composable
 internal fun SearchResultsLoading() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        PackageLoadingIndicator()
+        PackageLoadingIndicator(contained = true)
     }
 }
 
@@ -66,55 +76,78 @@ internal fun SearchPackageDetailsSheet(
             if (details is PackageDetailsUiState.Failed) {
                 Text(stringResource(R.string.details_load_failed, packageName))
             } else {
-                PackageLoadingIndicator()
+                PackageLoadingIndicator(contained = true)
             }
         }
     }
 }
 
-/** Shows one package with separate actions to open its details or add it. */
+/** Shows one package inside an Expressive segmented row with press corner morphing and status badges. */
 @Composable
-internal fun SearchResult(entry: PackageEntry, added: Boolean, onAdd: (String) -> Unit, onOpen: () -> Unit) {
-    val status = when {
-        entry.packageName in PackageDirectory.variants -> R.string.package_search_bundled
-        added -> R.string.package_search_added
+internal fun SearchResult(
+    entry: PackageEntry,
+    index: Int,
+    count: Int,
+    added: Boolean,
+    onAdd: (String) -> Unit,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val statusBadge = when {
+        entry.packageName in PackageDirectory.variants -> R.string.package_search_bundled to StatusTone.PRIMARY
+        added -> R.string.package_search_added to StatusTone.SECONDARY
         else -> null
     }
-    ListItem(
-        modifier = Modifier.clip(MaterialTheme.shapes.large)
-            .clickable(onClickLabel = stringResource(R.string.view_details), onClick = onOpen),
-        headlineContent = {
-            Text(
-                entry.displayName,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        supportingContent = if (entry.displayName != entry.packageName) {
-            {
-                PackageNameText(entry.packageName, singleLine = true)
-            }
-        } else {
-            null
-        },
-        leadingContent = { SearchResultIcon(entry.packageName) },
-        trailingContent = {
-            if (status == null) {
-                FilledTonalButton(onClick = { onAdd(entry.packageName) }) {
-                    Text(stringResource(R.string.package_search_add))
+    val interactionSource = remember { MutableInteractionSource() }
+    val shape = rememberAnimatedSegmentedShape(index, count, interactionSource)
+
+    Surface(
+        modifier = modifier
+            .clip(shape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(),
+                onClickLabel = stringResource(R.string.view_details),
+                onClick = onOpen,
+            ),
+        shape = shape,
+        color = segmentedContainerColor(),
+    ) {
+        ListItem(
+            headlineContent = {
+                Text(
+                    entry.displayName,
+                    style = MaterialTheme.typography.titleMediumEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            supportingContent = if (entry.displayName != entry.packageName) {
+                {
+                    PackageNameText(entry.packageName, singleLine = true)
                 }
             } else {
-                Text(
-                    text = stringResource(status),
-                    modifier = Modifier.widthIn(max = 96.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    textAlign = TextAlign.End,
-                )
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-    )
+                null
+            },
+            leadingContent = { SearchResultIcon(entry.packageName) },
+            trailingContent = {
+                if (statusBadge == null) {
+                    FilledTonalButton(
+                        onClick = { onAdd(entry.packageName) },
+                        shapes = ButtonDefaults.shapes(),
+                    ) {
+                        Text(stringResource(R.string.package_search_add))
+                    }
+                } else {
+                    StatusBadge(
+                        text = stringResource(statusBadge.first),
+                        tone = statusBadge.second,
+                    )
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        )
+    }
 }
 
 /** Loads the app icon off the main thread and shows a themed fallback when the icon is unavailable. */

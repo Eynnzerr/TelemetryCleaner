@@ -1,16 +1,23 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
 package com.eynnzerr.telemetrycleaner.ui.history
 
 import android.text.format.DateFormat
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -22,75 +29,106 @@ import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupCheck
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupCheckStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupRemoval
 import com.eynnzerr.telemetrycleaner.ui.components.PackageInfoCard
+import com.eynnzerr.telemetrycleaner.ui.components.PackageNameText
+import com.eynnzerr.telemetrycleaner.ui.components.StatusBadge
+import com.eynnzerr.telemetrycleaner.ui.components.StatusTone
 import com.eynnzerr.telemetrycleaner.ui.components.displayName
+import com.eynnzerr.telemetrycleaner.ui.components.segmentedContainerColor
 import java.util.Date
 
-/** Shows the most recent check, including checks that produced no removal records. */
+/** Shows the most recent check with Expressive semantic status coloring. */
 @Composable
 internal fun LatestAutoCleanupCheck(check: AutoCleanupCheck?) {
+    val colors = MaterialTheme.colorScheme
+    val (container, content, tone) = when (check?.status) {
+        AutoCleanupCheckStatus.COMPLETE -> Triple(colors.secondaryContainer, colors.onSecondaryContainer, StatusTone.PRIMARY)
+        AutoCleanupCheckStatus.INCOMPLETE, AutoCleanupCheckStatus.INTERRUPTED -> Triple(
+            colors.errorContainer,
+            colors.onErrorContainer,
+            StatusTone.ERROR,
+        )
+        else -> Triple(segmentedContainerColor(), colors.onSurface, StatusTone.NEUTRAL)
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(24.dp),
+        color = container,
+        contentColor = content,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = stringResource(R.string.auto_cleanup_history_last_check),
-                modifier = Modifier.semantics { heading() },
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.auto_cleanup_history_last_check),
+                    modifier = Modifier.semantics { heading() },
+                    style = MaterialTheme.typography.titleMediumEmphasized,
+                )
+                if (check != null) {
+                    StatusBadge(
+                        text = stringResource(check.status.historyLabel()),
+                        tone = tone,
+                    )
+                }
+            }
             if (check == null) {
                 Text(
                     text = stringResource(R.string.auto_cleanup_history_no_checks),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = content.copy(alpha = 0.78f),
                 )
             } else {
-                Text(cleanupHistoryDateTime(check.timeMillis), style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    text = stringResource(check.status.historyLabel()),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (check.status == AutoCleanupCheckStatus.INCOMPLETE) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    text = cleanupHistoryDateTime(check.timeMillis),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = content.copy(alpha = 0.85f),
                 )
             }
         }
     }
 }
 
-/** Shows the package, Android space, time, and result for one removal. */
+/** Shows the package, Android space, time, and result badge for one removal inside a segmented card. */
 @Composable
-internal fun AutoCleanupRemovalRow(removal: AutoCleanupRemoval) {
+internal fun AutoCleanupRemovalRow(
+    removal: AutoCleanupRemoval,
+    shape: Shape = MaterialTheme.shapes.large,
+) {
     val componentName = PackageDirectory.variants[removal.packageName]?.displayName
     val spaceId = stringResource(R.string.space_id, removal.space.id)
-    PackageInfoCard {
-        Text(componentName ?: removal.packageName, style = MaterialTheme.typography.titleSmall)
-        if (componentName != null && componentName != removal.packageName) {
+    PackageInfoCard(shape = shape) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = removal.packageName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                text = componentName ?: removal.packageName,
+                style = MaterialTheme.typography.titleSmallEmphasized,
+                modifier = Modifier.weight(1f),
             )
+            StatusBadge(
+                text = stringResource(if (removal.success) R.string.uninstalled_result else R.string.unverified_result),
+                tone = if (removal.success) StatusTone.PRIMARY else StatusTone.ERROR,
+            )
+        }
+        if (componentName != null && componentName != removal.packageName) {
+            PackageNameText(removal.packageName)
         }
         Text(
             text = stringResource(R.string.status_in_space, removal.space.displayName(), spaceId),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
             text = cleanupHistoryDateTime(removal.timeMillis),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(if (removal.success) R.string.uninstalled_result else R.string.unverified_result),
-            style = MaterialTheme.typography.labelLarge,
-            color = if (removal.success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
         )
     }
 }

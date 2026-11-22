@@ -1,32 +1,35 @@
 package com.eynnzerr.telemetrycleaner.ui.packages
 
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
-import com.eynnzerr.telemetrycleaner.data.PackageEntry
 import com.eynnzerr.telemetrycleaner.ui.components.SecondaryListHeading
 import com.eynnzerr.telemetrycleaner.ui.components.SecondaryListScreen
 import com.eynnzerr.telemetrycleaner.ui.components.label
+import com.eynnzerr.telemetrycleaner.ui.components.segmentedItemShape
 import com.eynnzerr.telemetrycleaner.ui.theme.TelemetryCleanerTheme
 
-/** Shows the bundled component catalogue by ROM family. */
+/** Shows the bundled component catalogue grouped by ROM family in Expressive Segmented Lists. */
 @Composable
 internal fun PackageDirectoryScreen(
     onOpenIssues: () -> Unit,
     onBack: () -> Unit,
 ) {
     SecondaryListScreen(R.string.package_directory_title, onBack) {
-        item {
+        item(key = "feedback") {
             PackageDirectoryFeedback(onOpenIssues)
         }
         PackageDirectory.groups.forEach { (family, entries) ->
             item(key = family.name) {
                 SecondaryListHeading(family.label())
             }
-            items(entries, key = PackageEntry::packageName) { entry ->
-                PackageDirectoryEntry(entry)
+            itemsIndexed(entries, key = { _, entry -> entry.packageName }) { index, entry ->
+                PackageDirectoryEntry(
+                    entry = entry,
+                    shape = segmentedItemShape(index, entries.size),
+                )
             }
         }
     }

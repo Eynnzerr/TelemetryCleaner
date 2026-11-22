@@ -208,6 +208,8 @@
     <string name="restore_description">Disabled components will be re-enabled. Uninstalled components will be restored using the APK on this device.</string>
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>
+    <string name="close">Close</string>
+    <string name="copy_package_name">Copy package name</string>
     <string name="operation_results">Operation results</string>
     <string name="copy_uninstall_denial_logs">Copy uninstall denial logs</string>
     <string name="uninstall_denial_feedback_hint">The system blocked an uninstall. Use the copy icon below to include the logs in your feedback.</string>

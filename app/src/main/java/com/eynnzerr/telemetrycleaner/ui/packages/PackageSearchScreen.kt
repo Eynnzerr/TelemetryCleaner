@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+
 package com.eynnzerr.telemetrycleaner.ui.packages
 
 import androidx.compose.foundation.layout.Arrangement
@@ -6,17 +8,23 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExpandedFullScreenSearchBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
@@ -31,18 +39,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
-import com.eynnzerr.telemetrycleaner.data.PackageEntry
 import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.feature.packages.PackageDetailsUiState
 import com.eynnzerr.telemetrycleaner.feature.packages.PackageSearchUiState
-import com.eynnzerr.telemetrycleaner.ui.components.NavigateBackButton
+import com.eynnzerr.telemetrycleaner.ui.components.SegmentedListDefaults
 import kotlinx.coroutines.launch
 
-/** Stateless search screen backed by [com.eynnzerr.telemetrycleaner.feature.packages.PackageSearchViewModel]. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Stateless Expressive search screen with Segmented List results and edge-to-edge scrolling. */
 @Composable
 internal fun PackageSearchScreen(
     state: PackageSearchUiState,
@@ -72,21 +80,51 @@ internal fun PackageSearchScreen(
             searchBarState = searchBarState,
             onSearch = { keyboard?.hide() },
             placeholder = { Text(stringResource(R.string.package_search_hint)) },
-            leadingIcon = { NavigateBackButton(onClick = onNavigateBack) },
+            leadingIcon = {
+                IconButton(onClick = onNavigateBack, shapes = IconButtonDefaults.shapes()) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_arrow_back),
+                        contentDescription = stringResource(R.string.navigate_back),
+                    )
+                }
+            },
+            trailingIcon = if (query.text.isNotEmpty()) {
+                {
+                    IconButton(
+                        onClick = { query.edit { replace(0, length, "") } },
+                        shapes = IconButtonDefaults.shapes(),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_close),
+                            contentDescription = stringResource(R.string.close),
+                        )
+                    }
+                }
+            } else {
+                null
+            },
         )
     }
-    val searchResults: @Composable ColumnScope.() -> Unit = {
+
+    val searchResults: @Composable ColumnScope.(bottomInset: Dp) -> Unit = { bottomInset ->
         val focusManager = LocalFocusManager.current
         val keyboard = LocalSoftwareKeyboardController.current
         Column(
-            modifier = Modifier.align(Alignment.CenterHorizontally).widthIn(max = 620.dp).fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 12.dp),
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .widthIn(max = 620.dp)
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (state.connection.status == PrivilegeStatus.CONNECTING) {
                 SearchResultsLoading()
             } else if (state.connection.status != PrivilegeStatus.READY) {
-                Text(stringResource(R.string.package_search_needs_connection))
+                Text(
+                    text = stringResource(R.string.package_search_needs_connection),
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             } else {
                 val failure = when {
                     state.exactLookupFailed -> R.string.package_search_exact_failed
@@ -94,19 +132,30 @@ internal fun PackageSearchScreen(
                     else -> null
                 }
                 if (failure != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(failure), Modifier.weight(1f))
-                        TextButton(onClick = onRetry) { Text(stringResource(R.string.refresh)) }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(failure),
+                            Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = onRetry, shapes = ButtonDefaults.shapes()) {
+                            Text(stringResource(R.string.refresh))
+                        }
                     }
                 }
                 when {
                     state.results.isNotEmpty() -> LazyColumn(
-                        contentPadding = PaddingValues(bottom = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(bottom = 24.dp + bottomInset),
+                        verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap),
                     ) {
-                        items(state.results, key = PackageEntry::packageName) { entry ->
+                        itemsIndexed(state.results, key = { _, entry -> entry.packageName }) { index, entry ->
                             SearchResult(
                                 entry = entry,
+                                index = index,
+                                count = state.results.size,
                                 added = entry.packageName in state.customPackageNames,
                                 onAdd = onAdd,
                                 onOpen = {
@@ -114,17 +163,27 @@ internal fun PackageSearchScreen(
                                     keyboard?.hide()
                                     onOpenDetails(entry.packageName)
                                 },
+                                modifier = Modifier.animateItem(),
                             )
                         }
                     }
-                    state.exactLookupMissing -> Text(stringResource(R.string.package_search_exact_missing, state.term))
+                    state.exactLookupMissing -> Text(
+                        stringResource(R.string.package_search_exact_missing, state.term),
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     state.isLoadingResults -> SearchResultsLoading()
-                    failure == null -> Text(stringResource(R.string.package_search_no_matches))
+                    failure == null -> Text(
+                        stringResource(R.string.package_search_no_matches),
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     else -> Unit
                 }
             }
         }
     }
+
     Scaffold(
         topBar = {
             Box(
@@ -135,21 +194,27 @@ internal fun PackageSearchScreen(
                     state = searchBarState,
                     inputField = { inputField(onBack) },
                     modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp),
                 )
             }
         },
     ) { insets ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets),
-            content = searchResults,
-        )
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = insets.calculateTopPadding()),
+        ) {
+            searchResults(insets.calculateBottomPadding())
+        }
     }
     ExpandedFullScreenSearchBar(
         state = searchBarState,
         inputField = { inputField { coroutineScope.launch { searchBarState.animateToCollapsed() } } },
-        content = searchResults,
-    )
+    ) {
+        Column(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
+            searchResults(0.dp)
+        }
+    }
     if (state.details !is PackageDetailsUiState.Closed) {
         SearchPackageDetailsSheet(
             details = state.details,

@@ -1,20 +1,31 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
 package com.eynnzerr.telemetrycleaner.ui.settings
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -25,7 +36,7 @@ import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.label
 import com.eynnzerr.telemetrycleaner.ui.theme.TelemetryCleanerTheme
 
-/** Groups manual uninstall fallback and automatic cleanup settings. */
+/** Groups manual uninstall fallback and automatic cleanup settings into a 4-item Segmented List. */
 @Composable
 internal fun CleanupSettings(
     disableOnUninstallFailure: Boolean?,
@@ -40,43 +51,83 @@ internal fun CleanupSettings(
     SettingsGroup(stringResource(R.string.settings_group_cleanup)) {
         DisableOnUninstallFailureSetting(
             enabled = disableOnUninstallFailure,
+            index = 0,
+            count = 4,
             onEnabledChange = onDisableOnUninstallFailureChange,
         )
         AutoCleanupSettings(
             enabled = enabled,
             status = status,
             intervalMinutes = intervalMinutes,
+            index = 1,
+            count = 4,
             onEnabledChange = onEnabledChange,
         )
         AutoCleanupIntervalSettings(
             enabled = enabled == true,
             intervalMinutes = intervalMinutes,
+            index = 2,
+            count = 4,
             onIntervalChange = onIntervalChange,
         )
         SettingsLink(
             icon = R.drawable.ic_settings_history,
             title = R.string.auto_cleanup_history_title,
             description = R.string.settings_history_description,
+            index = 3,
+            count = 4,
             enabled = enabled == true,
             onClick = onOpenHistory,
         )
     }
 }
 
+/** Renders an Expressive Switch with a check icon inside the thumb when enabled. */
+@Composable
+private fun ExpressiveSwitch(checked: Boolean, enabled: Boolean) {
+    Switch(
+        checked = checked,
+        enabled = enabled,
+        onCheckedChange = null,
+        thumbContent = if (checked) {
+            {
+                Icon(
+                    painter = painterResource(R.drawable.ic_settings_check),
+                    contentDescription = null,
+                    modifier = Modifier.size(SwitchDefaults.IconSize),
+                )
+            }
+        } else {
+            null
+        },
+    )
+}
+
 /** Lets the user control the disable fallback for manual uninstall. */
 @Composable
-private fun DisableOnUninstallFailureSetting(enabled: Boolean?, onEnabledChange: (Boolean) -> Unit) {
+private fun DisableOnUninstallFailureSetting(
+    enabled: Boolean?,
+    index: Int,
+    count: Int,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
     SettingsItem(
         icon = R.drawable.ic_settings_check,
         title = stringResource(R.string.settings_disable_on_uninstall_failure),
+        index = index,
+        count = count,
+        interactionSource = interactionSource,
         modifier = Modifier.toggleable(
             value = enabled == true,
             enabled = enabled != null,
             role = Role.Switch,
+            interactionSource = interactionSource,
+            indication = ripple(),
             onValueChange = onEnabledChange,
         ),
         supportingContent = { Text(stringResource(R.string.settings_disable_on_uninstall_failure_description)) },
-        trailingContent = { Switch(checked = enabled == true, enabled = enabled != null, onCheckedChange = null) },
+        trailingContent = { ExpressiveSwitch(checked = enabled == true, enabled = enabled != null) },
     )
 }
 
@@ -86,16 +137,24 @@ private fun AutoCleanupSettings(
     enabled: Boolean?,
     status: AutoCleanupStatus,
     intervalMinutes: Int,
+    index: Int,
+    count: Int,
     onEnabledChange: (Boolean) -> Unit,
 ) {
     var showEnableConfirmation by rememberSaveable { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
     SettingsItem(
         icon = R.drawable.ic_refresh,
         title = stringResource(R.string.auto_cleanup_notification_title),
+        index = index,
+        count = count,
+        interactionSource = interactionSource,
         modifier = Modifier.toggleable(
             value = enabled == true,
             enabled = enabled != null,
             role = Role.Switch,
+            interactionSource = interactionSource,
+            indication = ripple(),
             onValueChange = { requestedEnabled ->
                 if (requestedEnabled) {
                     showEnableConfirmation = true
@@ -116,7 +175,7 @@ private fun AutoCleanupSettings(
                 color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        trailingContent = { Switch(checked = enabled == true, enabled = enabled != null, onCheckedChange = null) },
+        trailingContent = { ExpressiveSwitch(checked = enabled == true, enabled = enabled != null) },
     )
     if (showEnableConfirmation && enabled == false) {
         AutoCleanupEnableDialog(
@@ -135,12 +194,16 @@ private fun AutoCleanupSettings(
 private fun AutoCleanupIntervalSettings(
     enabled: Boolean,
     intervalMinutes: Int,
+    index: Int,
+    count: Int,
     onIntervalChange: (Int) -> Unit,
 ) {
     var editing by rememberSaveable(enabled) { mutableStateOf(false) }
     SettingsItem(
         icon = R.drawable.ic_settings_schedule,
         title = stringResource(R.string.settings_auto_cleanup_interval),
+        index = index,
+        count = count,
         supportingContent = { Text(cleanupIntervalLabel(intervalMinutes)) },
         enabled = enabled,
         onClick = { editing = true },
@@ -187,12 +250,18 @@ private fun AutoCleanupIntervalDialog(
             )
         },
         confirmButton = {
-            TextButton(enabled = minutes != null, onClick = { minutes?.let(onConfirm) }) {
+            TextButton(
+                enabled = minutes != null,
+                onClick = { minutes?.let(onConfirm) },
+                shapes = ButtonDefaults.shapes(),
+            ) {
                 Text(stringResource(R.string.settings_save))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) {
+                Text(stringResource(R.string.cancel))
+            }
         },
     )
 }
@@ -210,12 +279,12 @@ private fun AutoCleanupEnableDialog(intervalMinutes: Int, onConfirm: () -> Unit,
         title = { Text(stringResource(R.string.auto_cleanup_enable_title)) },
         text = { Text(stringResource(R.string.auto_cleanup_enable_message, cleanupIntervalLabel(intervalMinutes))) },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            TextButton(onClick = onConfirm, shapes = ButtonDefaults.shapes()) {
                 Text(stringResource(R.string.auto_cleanup_enable_confirm))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) {
                 Text(stringResource(R.string.cancel))
             }
         },

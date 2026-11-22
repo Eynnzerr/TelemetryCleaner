@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+
 package com.eynnzerr.telemetrycleaner.ui.components
 
 import androidx.annotation.StringRes
@@ -11,26 +13,43 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
 
-/** Shows the standard back icon and its localized accessibility label. */
+/** Shows the Expressive tonal back button and its localized accessibility label. */
 @Composable
-internal fun NavigateBackButton(onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
+internal fun NavigateBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilledTonalIconButton(
+        onClick = onClick,
+        modifier = modifier.padding(start = 4.dp),
+        shapes = IconButtonDefaults.shapes(),
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
         Icon(
             painterResource(R.drawable.ic_arrow_back),
             contentDescription = stringResource(R.string.navigate_back),
@@ -38,44 +57,77 @@ internal fun NavigateBackButton(onClick: () -> Unit) {
     }
 }
 
-/** Shows the title and back action for a secondary page. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Shows the Expressive collapsing large top bar for secondary pages (Settings, Directory, History). */
 @Composable
-internal fun BackTopAppBar(@StringRes title: Int, onBack: () -> Unit) {
-    TopAppBar(
-        title = { Text(stringResource(title)) },
+internal fun LargeBackTopAppBar(
+    @StringRes title: Int,
+    onBack: () -> Unit,
+    scrollBehavior: TopAppBarScrollBehavior,
+) {
+    LargeFlexibleTopAppBar(
+        title = {
+            Text(
+                text = stringResource(title),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
         navigationIcon = { NavigateBackButton(onClick = onBack) },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        scrollBehavior = scrollBehavior,
     )
 }
 
-/** Lays out a titled list using the padding and maximum width shared by history and the catalogue. */
+/**
+ * Lays out a secondary page with a collapsing [LargeFlexibleTopAppBar], edge-to-edge bottom scrolling,
+ * and Expressive Segmented List spacing.
+ */
 @Composable
 internal fun SecondaryListScreen(
     @StringRes title: Int,
     onBack: () -> Unit,
     content: LazyListScope.() -> Unit,
 ) {
-    Scaffold(topBar = { BackTopAppBar(title, onBack) }) { padding ->
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        topBar = { LargeBackTopAppBar(title, onBack, scrollBehavior) },
+    ) { padding ->
         Box(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = padding.calculateTopPadding()),
             contentAlignment = Alignment.TopCenter,
         ) {
             LazyColumn(
-                modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .widthIn(max = 620.dp)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 8.dp,
+                    bottom = 24.dp + padding.calculateBottomPadding(),
+                ),
+                verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap),
                 content = content,
             )
         }
     }
 }
 
-/** Labels a section within a secondary list. */
+/** Labels a grouped section within a secondary list using primary expressive section typography. */
 @Composable
 internal fun SecondaryListHeading(@StringRes title: Int) {
     Text(
         text = stringResource(title),
-        modifier = Modifier.padding(top = 12.dp).semantics { heading() },
-        style = MaterialTheme.typography.titleLarge,
+        modifier = Modifier
+            .padding(start = 12.dp, top = 16.dp, bottom = 6.dp)
+            .semantics { heading() },
+        style = MaterialTheme.typography.titleSmallEmphasized,
+        color = MaterialTheme.colorScheme.primary,
     )
 }

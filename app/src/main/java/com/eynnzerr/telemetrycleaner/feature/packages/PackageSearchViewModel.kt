@@ -134,12 +134,13 @@ internal class PackageSearchViewModel(
         detailsState,
     ) { inventory, (term, matches), exactLookup, details ->
         val exactEntry = (exactLookup as? ExactLookupState.Found)?.entry
-        val managedNames = PackageDirectory.variants.keys + inventory.customPackageNames
+        val bundledNames = PackageDirectory.variants.keys
+        // Keep ordering stable when the user taps "Add" so items update in place instead of jumping off-screen.
         val sortedResults = (listOfNotNull(exactEntry) + matches)
             .distinctBy(PackageEntry::packageName)
             .sortedWith(
                 compareBy<PackageEntry> { it.packageName != term }
-                    .thenBy { it.packageName !in managedNames }
+                    .thenBy { it.packageName !in bundledNames }
                     .thenBy(String.CASE_INSENSITIVE_ORDER, PackageEntry::displayName)
                     .thenBy(PackageEntry::packageName),
             )

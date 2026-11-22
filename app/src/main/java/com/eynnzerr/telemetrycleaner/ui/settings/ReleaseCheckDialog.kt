@@ -1,6 +1,10 @@
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
 package com.eynnzerr.telemetrycleaner.ui.settings
 
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,18 +42,28 @@ internal fun ReleaseCheckDialog(
         text = { Text(message) },
         confirmButton = {
             when (result) {
-                is ReleaseCheckResult.UpdateAvailable -> TextButton(onClick = { onOpenRelease(result.releaseUrl) }) {
+                is ReleaseCheckResult.UpdateAvailable -> TextButton(
+                    onClick = { onOpenRelease(result.releaseUrl) },
+                    shapes = ButtonDefaults.shapes(),
+                ) {
                     Text(stringResource(R.string.update_open_release))
                 }
-                ReleaseCheckResult.NoRelease -> TextButton(onClick = onOpenReleases) {
+                ReleaseCheckResult.NoRelease -> TextButton(
+                    onClick = onOpenReleases,
+                    shapes = ButtonDefaults.shapes(),
+                ) {
                     Text(stringResource(R.string.update_open_releases))
                 }
-                else -> TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_close)) }
+                else -> TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) {
+                    Text(stringResource(R.string.update_close))
+                }
             }
         },
         dismissButton = {
             if (hasGitHubLink) {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_close)) }
+                TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) {
+                    Text(stringResource(R.string.update_close))
+                }
             }
         },
     )
