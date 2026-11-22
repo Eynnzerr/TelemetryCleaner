@@ -23,12 +23,9 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -97,12 +94,6 @@ class CleanerRepository internal constructor(
     /** Emits after a custom package addition or removal is persisted. */
     internal val customPackageChanges: SharedFlow<CustomPackageChange> = customPackageChangesFlow.asSharedFlow()
 
-    /** Holds the most recent interactive scan so other screens (e.g. search) can reuse visible entries. */
-    private val mutableLatestSnapshot = MutableStateFlow<ScanSnapshot?>(null)
-
-    /** The latest completed interactive scan snapshot, if any. */
-    internal val latestSnapshot: StateFlow<ScanSnapshot?> = mutableLatestSnapshot.asStateFlow()
-
     /** Rechecks Shizuku or the existing Root session without requesting authorization. */
     @MainThread
     fun refreshConnection() = sessionManager.refreshConnection()
@@ -117,25 +108,10 @@ class CleanerRepository internal constructor(
     suspend fun scan(): ScanSnapshot = sessionManager.withPackageCommands { commands, _ ->
         val manager = appContext.packageManager
         val customEntries = settings.readPreferences().customPackageNames.sorted().map(::customEntry)
-        scanPackages(commands, PackageDirectory.variants.values + customEntries, manager).also {
-            mutableLatestSnapshot.value = it
-        }
+        scanPackages(commands, PackageDirectory.variants.values + customEntries, manager)
     }
 
-    /** Discovers device packages for searches by package name or local application label. */
-    suspend fun discoverPackages(): List<PackageEntry> = sessionManager.withPackageCommands { commands, _ ->
-        val names = commands.listPackageNames(Process.myUid() / PER_USER_RANGE)
-        val manager = appContext.packageManager
-        val applications = try {
-            manager.getInstalledApplications(PackageManager.MATCH_UNINSTALLED_PACKAGES).associateBy { it.packageName }
-        } catch (_: SecurityException) {
-            emptyMap()
-        }
-        names.map { name -> customEntry(name, applications[name]) }
-            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, PackageEntry::displayName).thenBy(PackageEntry::packageName))
-    }
-
-    /** Reads the same exact record as a manual scan. Only confirmed absence returns null. */
+    /** Verifies whether an exact package name exists on the device via the privileged service. */
     internal suspend fun lookupPackage(packageName: String): PackageEntry? = sessionManager.withPackageCommands { commands, _ ->
         require(isExactPackageName(packageName))
         when (val reading = commands.read(packageName)) {
@@ -145,23 +121,12 @@ class CleanerRepository internal constructor(
         }
     }
 
-    /** Reads the selected package's details and permissions across the visible spaces. */
-    internal suspend fun loadPackageDetails(packageName: String): ScanSnapshot = sessionManager.withPackageCommands { commands, _ ->
-        val entry = PackageDirectory.variants[packageName] ?: customEntry(packageName)
-        scanPackages(commands, listOf(entry), appContext.packageManager)
-    }
-
     /** Changes directory membership without changing package installation or automatic cleanup. */
     suspend fun setCustomPackage(packageName: String, included: Boolean): Boolean {
         val saved = customPackagesMutex.withLock {
             packageName !in PackageDirectory.variants && settings.setCustomPackage(packageName, included)
         }
         if (saved) {
-            if (!included) {
-                mutableLatestSnapshot.update { snapshot ->
-                    snapshot?.copy(packages = snapshot.packages.filterNot { it.entry.packageName == packageName })
-                }
-            }
             val change = if (included) {
                 CustomPackageChange.Added(packageName)
             } else {

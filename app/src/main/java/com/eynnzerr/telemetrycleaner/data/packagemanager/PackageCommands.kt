@@ -109,40 +109,6 @@ internal class PackageCommands(
         return ScanSnapshot(callerUser, users, packages)
     }
 
-    /** Combines per-user package lists with registered packages from the compact package dump. */
-    suspend fun listPackageNames(callerUser: Int): Set<String> {
-        val userIds = try {
-            listUsers().mapTo(mutableSetOf(callerUser), AndroidUser::id)
-        } catch (_: UserListScanException) {
-            setOf(callerUser)
-        }
-        return buildSet {
-            for (id in userIds) {
-                currentCoroutineContext().ensureActive()
-                val lines = inventoryLines {
-                    executor.execute(listOf("list", "packages", "-u", "--user", id.toString()))
-                }
-                lines.filter { it.startsWith("package:") }
-                    .map { it.removePrefix("package:") }
-                    .filterTo(this, String::isNotBlank)
-            }
-            currentCoroutineContext().ensureActive()
-            // Only "pkg," identifies an active package record. "dis," records are superseded system copies.
-            val records = inventoryLines { executor.dump("--checkin", "packages") }
-            records.filter { it.startsWith("pkg,") }
-                .map { it.removePrefix("pkg,").substringBefore(',', missingDelimiterValue = "") }
-                .filterTo(this, String::isNotBlank)
-            check(isNotEmpty()) { "The package service returned no readable package inventory" }
-        }
-    }
-
-    /** A denied or unavailable inventory source leaves the other sources usable. */
-    private inline fun inventoryLines(request: () -> PackageShellResult): Sequence<String> {
-        val result = query({ return emptySequence() }, request)
-        if (result.queryIssue() != null) return emptySequence()
-        return result.output.lineSequence().map(String::trim)
-    }
-
     /** Returns the package-manager users visible to the service. */
     private fun listUsers(): List<AndroidUser> {
         val result = query({ throw UserListScanException(it) }) {

@@ -327,7 +327,7 @@ private fun CleanerScreenStatePreview(
 ) {
     TelemetryCleanerTheme(dynamicColor = false) {
         CleanerScreen(
-            state, onIntent = {}, onOpenSettings = {}, onOpenSearch = {},
+            state, onIntent = {}, onOpenSettings = {},
             customPackageNames = emptySet(), onRemoveCustomPackage = {},
         )
     }
@@ -360,7 +360,7 @@ private fun CleanerSheetPreviewContent(
     TelemetryCleanerTheme(dynamicColor = false) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
             CleanerScreen(
-                state.copy(panel = null), onIntent = {}, onOpenSettings = {}, onOpenSearch = {},
+                state.copy(panel = null), onIntent = {}, onOpenSettings = {},
                 customPackageNames = emptySet(), onRemoveCustomPackage = {},
             )
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f)))
@@ -394,7 +394,7 @@ private fun CleanerSheetPreviewContent(
 private fun CleanerLocaleAndThemePreview() {
     TelemetryCleanerTheme(dynamicColor = false) {
         CleanerScreen(
-            scan, onIntent = {}, onOpenSettings = {}, onOpenSearch = {},
+            scan, onIntent = {}, onOpenSettings = {},
             customPackageNames = emptySet(), onRemoveCustomPackage = {},
         )
     }
@@ -418,7 +418,7 @@ private fun CleanerScanningTopBarPreview() {
 @Composable
 private fun CleanerTopBarPreview(activity: CleanerActivity) {
     TelemetryCleanerTheme(dynamicColor = false) {
-        CleanerTopBar(activity, onRefresh = {}, onOpenSettings = {}, onOpenSearch = {})
+        CleanerTopBar(activity, onRefresh = {}, onOpenSettings = {})
     }
 }
 

@@ -152,42 +152,6 @@ class PackageCommandsTest {
     }
 
     @Test
-    fun listPackageNames_combinesPerUserListsAndCheckinActivePkgRecordsOnly() = runTest {
-        val executor = FakePackageExecutor(
-            onExecute = { args ->
-                when (args) {
-                    listOf("list", "users") -> PackageShellResult(0, "Users:\n  UserInfo{0:Owner:1} running\n  UserInfo{10:Clone:1} running")
-                    listOf("list", "packages", "-u", "--user", "0") -> PackageShellResult(
-                        0,
-                        "package:com.alpha.app\npackage:com.beta.app",
-                    )
-                    listOf("list", "packages", "-u", "--user", "10") -> PackageShellResult(
-                        1,
-                        "Permission Denial: user 10 denied",
-                    )
-                    else -> PackageShellResult(1, "")
-                }
-            },
-            onDump = { args ->
-                if (args == listOf("--checkin", "packages")) {
-                    PackageShellResult(
-                        0,
-                        """
-                        pkg,com.gamma.hidden,100,1
-                        dis,com.old.superseded,50,1
-                        """.trimIndent(),
-                    )
-                } else {
-                    PackageShellResult(1, "")
-                }
-            },
-        )
-
-        val names = PackageCommands(executor).listPackageNames(callerUser = 0)
-        assertEquals(setOf("com.alpha.app", "com.beta.app", "com.gamma.hidden"), names)
-    }
-
-    @Test
     fun change_uninstallSuccessAndFallbackDisableWhenBlocked() = runTest {
         val pkg = "com.oppo.ctautoregist"
         val target = ChangeTarget(pkg, 0)

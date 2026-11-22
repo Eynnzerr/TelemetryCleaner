@@ -51,7 +51,6 @@ fun CleanerScreen(
     state: CleanerState,
     onIntent: (CleanerIntent) -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenSearch: () -> Unit,
     customPackageNames: Set<String>,
     onRemoveCustomPackage: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -80,7 +79,6 @@ fun CleanerScreen(
                 activity = state.activity,
                 onRefresh = { onIntent(CleanerIntent.Refresh) },
                 onOpenSettings = onOpenSettings,
-                onOpenSearch = onOpenSearch,
                 scrollBehavior = scrollBehavior,
             )
         },

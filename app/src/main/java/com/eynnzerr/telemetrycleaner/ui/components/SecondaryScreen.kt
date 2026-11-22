@@ -6,6 +6,7 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -63,6 +64,7 @@ internal fun LargeBackTopAppBar(
     @StringRes title: Int,
     onBack: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     LargeFlexibleTopAppBar(
         title = {
@@ -73,6 +75,7 @@ internal fun LargeBackTopAppBar(
             )
         },
         navigationIcon = { NavigateBackButton(onClick = onBack) },
+        actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.surface,
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -89,12 +92,13 @@ internal fun LargeBackTopAppBar(
 internal fun SecondaryListScreen(
     @StringRes title: Int,
     onBack: () -> Unit,
+    actions: @Composable RowScope.() -> Unit = {},
     content: LazyListScope.() -> Unit,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        topBar = { LargeBackTopAppBar(title, onBack, scrollBehavior) },
+        topBar = { LargeBackTopAppBar(title, onBack, scrollBehavior, actions) },
     ) { padding ->
         Box(
             modifier = Modifier

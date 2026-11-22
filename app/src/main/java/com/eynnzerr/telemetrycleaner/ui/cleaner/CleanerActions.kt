@@ -50,13 +50,12 @@ import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerActivity
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerIntent
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerState
 
-/** Provides Expressive settings, refresh, and package search actions with scroll-aware tonal elevation. */
+/** Provides Expressive settings and refresh actions with scroll-aware tonal elevation. */
 @Composable
 internal fun CleanerTopBar(
     activity: CleanerActivity,
     onRefresh: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenSearch: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior? = null,
 ) {
     TopAppBar(
@@ -88,15 +87,6 @@ internal fun CleanerTopBar(
                 Icon(
                     painterResource(R.drawable.ic_refresh),
                     contentDescription = stringResource(R.string.refresh),
-                )
-            }
-            IconButton(
-                onClick = onOpenSearch,
-                shapes = IconButtonDefaults.shapes(),
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_search),
-                    contentDescription = stringResource(R.string.package_search_title),
                 )
             }
         },

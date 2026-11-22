@@ -14,7 +14,6 @@ class DestinationSerializationTest {
             Destination.Settings,
             Destination.AutoCleanupHistory,
             Destination.PackageDirectory,
-            Destination.PackageSearch,
         )
         destinations.forEach { destination ->
             assertNotNull(

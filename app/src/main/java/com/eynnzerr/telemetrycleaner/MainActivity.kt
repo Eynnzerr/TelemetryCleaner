@@ -35,15 +35,14 @@ import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerIntent
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerUiEvent
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerViewModel
 import com.eynnzerr.telemetrycleaner.feature.history.AutoCleanupHistoryViewModel
-import com.eynnzerr.telemetrycleaner.feature.packages.PackageSearchEvent
-import com.eynnzerr.telemetrycleaner.feature.packages.PackageSearchViewModel
+import com.eynnzerr.telemetrycleaner.feature.packages.PackageDirectoryEvent
+import com.eynnzerr.telemetrycleaner.feature.packages.PackageDirectoryViewModel
 import com.eynnzerr.telemetrycleaner.feature.settings.SettingsEvent
 import com.eynnzerr.telemetrycleaner.feature.settings.SettingsViewModel
 import com.eynnzerr.telemetrycleaner.service.AutoCleanupService
 import com.eynnzerr.telemetrycleaner.ui.cleaner.CleanerScreen
 import com.eynnzerr.telemetrycleaner.ui.history.AutoCleanupHistoryScreen
 import com.eynnzerr.telemetrycleaner.ui.packages.PackageDirectoryScreen
-import com.eynnzerr.telemetrycleaner.ui.packages.PackageSearchScreen
 import com.eynnzerr.telemetrycleaner.ui.settings.ReleaseCheckDialog
 import com.eynnzerr.telemetrycleaner.ui.settings.SettingsScreen
 import com.eynnzerr.telemetrycleaner.ui.theme.TelemetryCleanerTheme
@@ -72,9 +71,6 @@ internal sealed interface Destination : NavKey {
 
     @Serializable
     data object PackageDirectory : Destination
-
-    @Serializable
-    data object PackageSearch : Destination
 }
 
 /** Slides both pages in the same direction using a shared timing curve. */
@@ -89,7 +85,7 @@ private fun AnimatedContentTransitionScope<*>.pageSlide(
 /** Hosts the navigation display and bridges Android platform capabilities (permissions, service, intents). */
 class MainActivity : ComponentActivity() {
     private val cleanerViewModel: CleanerViewModel by viewModel()
-    private val packageSearchViewModel: PackageSearchViewModel by viewModel()
+    private val directoryViewModel: PackageDirectoryViewModel by viewModel()
     private val settingsViewModel: SettingsViewModel by viewModel()
     private val historyViewModel: AutoCleanupHistoryViewModel by viewModel()
 
@@ -110,7 +106,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val cleanerState = cleanerViewModel.state.collectAsStateWithLifecycle()
             val settingsState = settingsViewModel.state.collectAsStateWithLifecycle()
-            val searchState = packageSearchViewModel.state.collectAsStateWithLifecycle()
+            val directoryState = directoryViewModel.state.collectAsStateWithLifecycle()
             val historyState = historyViewModel.history.collectAsStateWithLifecycle()
 
             TelemetryCleanerTheme(palette = settingsState.value.themePalette) {
@@ -141,26 +137,8 @@ class MainActivity : ComponentActivity() {
                                 state = cleanerState.value,
                                 onIntent = cleanerViewModel::dispatch,
                                 onOpenSettings = { navigateIfAt(Destination.Cleaner, Destination.Settings) },
-                                onOpenSearch = {
-                                    if (backStack.lastOrNull() == Destination.Cleaner) {
-                                        packageSearchViewModel.resetSearch()
-                                        backStack.add(Destination.PackageSearch)
-                                    }
-                                },
                                 customPackageNames = settingsState.value.customPackageNames,
                                 onRemoveCustomPackage = cleanerViewModel::removeCustomPackage,
-                            )
-                        }
-                        entry<Destination.PackageSearch> {
-                            PackageSearchScreen(
-                                state = searchState.value,
-                                onScreenOpened = packageSearchViewModel::onScreenOpened,
-                                onQueryChange = packageSearchViewModel::onQueryChange,
-                                onRetry = packageSearchViewModel::retry,
-                                onAdd = packageSearchViewModel::addCustomPackage,
-                                onOpenDetails = packageSearchViewModel::openDetails,
-                                onDismissDetails = packageSearchViewModel::dismissDetails,
-                                onBack = goBack,
                             )
                         }
                         entry<Destination.Settings> {
@@ -213,8 +191,14 @@ class MainActivity : ComponentActivity() {
                         }
                         entry<Destination.PackageDirectory> {
                             PackageDirectoryScreen(
-                                onBack = goBack,
+                                state = directoryState.value,
+                                onOpenAddDialog = directoryViewModel::openAddDialog,
+                                onDismissAddDialog = directoryViewModel::dismissAddDialog,
+                                onInputChange = directoryViewModel::onInputChange,
+                                onSubmitAdd = directoryViewModel::submitAdd,
+                                onRemoveCustomPackage = directoryViewModel::removeCustomPackage,
                                 onOpenIssues = { openGitHub("$GITHUB_PROJECT_URL/issues") },
+                                onBack = goBack,
                             )
                         }
                     },
@@ -241,9 +225,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 launch {
-                    packageSearchViewModel.events.collect { event ->
+                    directoryViewModel.events.collect { event ->
                         when (event) {
-                            PackageSearchEvent.SaveFailed -> showSaveFailedToast()
+                            PackageDirectoryEvent.SaveFailed -> showSaveFailedToast()
                         }
                     }
                 }

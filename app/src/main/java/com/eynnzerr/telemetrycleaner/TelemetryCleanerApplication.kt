@@ -9,7 +9,7 @@ import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupHistoryStore
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerViewModel
 import com.eynnzerr.telemetrycleaner.feature.history.AutoCleanupHistoryViewModel
-import com.eynnzerr.telemetrycleaner.feature.packages.PackageSearchViewModel
+import com.eynnzerr.telemetrycleaner.feature.packages.PackageDirectoryViewModel
 import com.eynnzerr.telemetrycleaner.feature.settings.SettingsViewModel
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
@@ -27,7 +27,7 @@ private val cleanerModule = module {
     single { PrivilegeSessionManager(androidContext(), get()) }
     single { CleanerRepository(androidContext(), get(), get()) }
     viewModelOf(::CleanerViewModel)
-    viewModelOf(::PackageSearchViewModel)
+    viewModelOf(::PackageDirectoryViewModel)
     viewModelOf(::SettingsViewModel)
     viewModelOf(::AutoCleanupHistoryViewModel)
 }
