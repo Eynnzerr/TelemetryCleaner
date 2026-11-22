@@ -3,6 +3,7 @@ package com.eynnzerr.telemetrycleaner.feature.packages
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.eynnzerr.telemetrycleaner.data.CleanerRepository
+import com.eynnzerr.telemetrycleaner.data.CriticalSystemPackages
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
 import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
@@ -28,6 +29,7 @@ internal sealed interface AddCustomPackageStatus {
     data object Idle : AddCustomPackageStatus
     data object Verifying : AddCustomPackageStatus
     data object InvalidFormat : AddCustomPackageStatus
+    data object CriticalPackage : AddCustomPackageStatus
     data object AlreadyBundled : AddCustomPackageStatus
     data object AlreadyAdded : AddCustomPackageStatus
     data object NeedsConnection : AddCustomPackageStatus
@@ -52,7 +54,7 @@ internal sealed interface PackageDirectoryEvent {
 
 /**
  * Validates a user-entered package identifier before querying Android's package manager.
- * Rejects malformed identifiers, the core `android` framework package, bundled entries, and duplicates.
+ * Rejects malformed identifiers, protected core system packages, bundled entries, and duplicates.
  */
 internal fun validateCustomPackageInput(
     rawInput: String,
@@ -60,8 +62,8 @@ internal fun validateCustomPackageInput(
 ): AddCustomPackageStatus? {
     val trimmed = rawInput.trim()
     return when {
-        trimmed.isEmpty() || trimmed == "android" || !isExactPackageName(trimmed) ->
-            AddCustomPackageStatus.InvalidFormat
+        !isExactPackageName(trimmed) -> AddCustomPackageStatus.InvalidFormat
+        trimmed in CriticalSystemPackages.names -> AddCustomPackageStatus.CriticalPackage
         trimmed in PackageDirectory.variants -> AddCustomPackageStatus.AlreadyBundled
         trimmed in existingCustomNames -> AddCustomPackageStatus.AlreadyAdded
         else -> null

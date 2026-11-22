@@ -124,7 +124,8 @@ class CleanerRepository internal constructor(
     /** Changes directory membership without changing package installation or automatic cleanup. */
     suspend fun setCustomPackage(packageName: String, included: Boolean): Boolean {
         val saved = customPackagesMutex.withLock {
-            packageName !in PackageDirectory.variants && settings.setCustomPackage(packageName, included)
+            val blocked = included && (packageName in PackageDirectory.variants || packageName in CriticalSystemPackages.names)
+            !blocked && packageName !in PackageDirectory.variants && settings.setCustomPackage(packageName, included)
         }
         if (saved) {
             val change = if (included) {
@@ -171,6 +172,9 @@ class CleanerRepository internal constructor(
                     if (target.packageName !in managedNames) {
                         return@map ChangeOutcome(target, false, ChangeFailure.NotManaged)
                     }
+                    if (action != PackageAction.RESTORE && target.packageName in CriticalSystemPackages.names) {
+                        return@map ChangeOutcome(target, false, ChangeFailure.ProtectedSystemPackage)
+                    }
                     val outcome = changePackage(
                         commands,
                         backend,
@@ -199,7 +203,11 @@ class CleanerRepository internal constructor(
             val snapshot = scanPackages(commands, PackageDirectory.autoCleanupNames.map(PackageDirectory.variants::getValue))
             val users = snapshot.users.associateBy(AndroidUser::id)
             val spaces = settings.readPreferences().selectedUsers(snapshot)
-            val targets = snapshot.targetsFor(PackageAction.UNINSTALL, spaces)
+            val targets = snapshot.targetsFor(
+                action = PackageAction.UNINSTALL,
+                selectedUserIds = spaces,
+                includeDisabledForUninstall = false,
+            )
             val hasUnverifiedPackages = snapshot.packages.any { detected ->
                 spaces.any { detected.users[it] == PackageState.UNKNOWN }
             }

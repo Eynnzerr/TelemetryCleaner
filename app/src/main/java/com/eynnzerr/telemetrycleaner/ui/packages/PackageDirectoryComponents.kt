@@ -163,6 +163,7 @@ internal fun AddCustomPackageDialog(
         AddCustomPackageStatus.Verifying,
         -> null
         AddCustomPackageStatus.InvalidFormat -> stringResource(R.string.custom_package_invalid_format)
+        AddCustomPackageStatus.CriticalPackage -> stringResource(R.string.custom_package_critical_protected)
         AddCustomPackageStatus.AlreadyBundled -> stringResource(R.string.custom_package_already_bundled)
         AddCustomPackageStatus.AlreadyAdded -> stringResource(R.string.custom_package_already_added)
         AddCustomPackageStatus.NeedsConnection -> stringResource(R.string.custom_package_needs_connection)

@@ -89,6 +89,7 @@ internal fun PackageFamily.label(): Int = when (this) {
 internal fun ChangeFailure.displayMessage(): String = when (this) {
     is ChangeFailure.SystemError -> detail
     ChangeFailure.NotManaged -> stringResource(R.string.change_error_not_managed)
+    ChangeFailure.ProtectedSystemPackage -> stringResource(R.string.change_error_protected_system_package)
     ChangeFailure.ShizukuDisconnected -> stringResource(R.string.change_error_shizuku_disconnected)
     ChangeFailure.SpaceOperationDenied -> stringResource(R.string.change_error_space_operation_denied)
     ChangeFailure.StateUnverified -> stringResource(R.string.change_error_state_unverified)

@@ -223,6 +223,7 @@
     <string name="restored_result">Restored</string>
     <string name="unverified_result">Could not verify the requested change</string>
     <string name="change_error_not_managed">This component is no longer in the managed directory.</string>
+    <string name="change_error_protected_system_package">This package is a protected core system or recovery dependency and cannot be uninstalled or disabled.</string>
     <string name="change_error_shizuku_disconnected">Shizuku disconnected.</string>
     <string name="change_error_space_operation_denied">The system rejected this operation for the selected space.</string>
     <string name="change_error_state_unverified">Could not confirm component state. Refresh and try again.</string>
@@ -243,6 +244,7 @@
     <string name="custom_package_input_placeholder">e.g. com.vendor.regservice</string>
     <string name="custom_package_verifying">Verifying package on this device…</string>
     <string name="custom_package_invalid_format">Enter a valid full package name (e.g. com.vendor.regservice).</string>
+    <string name="custom_package_critical_protected">This package provides core system or recovery functionality and cannot be added as a test package.</string>
     <string name="custom_package_already_bundled">This package is already in the bundled directory.</string>
     <string name="custom_package_already_added">This package is already in your custom list.</string>
     <string name="custom_package_needs_connection">Connect to Shizuku or Root on the home screen first to verify this package.</string>

@@ -169,6 +169,9 @@ sealed interface ChangeFailure {
     /** The requested package is no longer in the bundled or custom directory. */
     data object NotManaged : ChangeFailure
 
+    /** The requested package is a protected core system or recovery package. */
+    data object ProtectedSystemPackage : ChangeFailure
+
     /** Shizuku disconnected before the operation could be submitted. */
     data object ShizukuDisconnected : ChangeFailure
 

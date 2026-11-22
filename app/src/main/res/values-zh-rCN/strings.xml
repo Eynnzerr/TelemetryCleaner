@@ -217,6 +217,7 @@
     <string name="restored_result">恢复成功</string>
     <string name="unverified_result">未能确认请求的变更</string>
     <string name="change_error_not_managed">该组件不在管理清单中。</string>
+    <string name="change_error_protected_system_package">这是受保护的系统核心组件或提权依赖，禁止卸载或冻结。</string>
     <string name="change_error_shizuku_disconnected">Shizuku 已断开。</string>
     <string name="change_error_space_operation_denied">系统拒绝了对该空间的操作。</string>
     <string name="change_error_state_unverified">无法确认组件状态。请刷新后重试。</string>
@@ -237,6 +238,7 @@
     <string name="custom_package_input_placeholder">例如 com.vendor.regservice</string>
     <string name="custom_package_verifying">正在核验设备上的包…</string>
     <string name="custom_package_invalid_format">请输入有效的完整包名（如 com.vendor.regservice）。</string>
+    <string name="custom_package_critical_protected">此包承担系统核心功能或用于提权恢复，禁止添加为测试包。</string>
     <string name="custom_package_already_bundled">该包已在内置组件清单中。</string>
     <string name="custom_package_already_added">该包已在自定义列表中。</string>
     <string name="custom_package_needs_connection">请先在主页连接 Shizuku 或 Root 以核验该包是否存在。</string>
