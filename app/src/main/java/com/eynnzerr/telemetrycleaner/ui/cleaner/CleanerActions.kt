@@ -21,7 +21,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
@@ -38,7 +37,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -154,7 +152,6 @@ private fun FloatingSelectionToolbar(
     enabled: Boolean,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val isDark = colorScheme.surface.luminance() < 0.5f
     val count = state.selectedPackageNames.size
     val canRestore = state.targetsFor(PackageAction.RESTORE).isNotEmpty()
     val canUninstall = state.targetsFor(PackageAction.UNINSTALL).isNotEmpty()
@@ -164,15 +161,11 @@ private fun FloatingSelectionToolbar(
     HorizontalFloatingToolbar(
         expanded = true,
         colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
-            toolbarContainerColor = if (isDark) {
-                colorScheme.surfaceContainerHigh
-            } else {
-                colorScheme.surfaceContainerLowest
-            },
+            toolbarContainerColor = colorScheme.surfaceContainerHigh,
             toolbarContentColor = colorScheme.onSurface,
         ),
-        expandedShadowElevation = 6.dp,
-        collapsedShadowElevation = 6.dp,
+        expandedShadowElevation = 3.dp,
+        collapsedShadowElevation = 3.dp,
         contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
         leadingContent = {
             Text(
@@ -194,14 +187,14 @@ private fun FloatingSelectionToolbar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (canRestore) {
-                FilledTonalButton(
+                Button(
                     onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.RESTORE)) },
                     enabled = enabled,
                     shapes = ButtonDefaults.shapes(),
                     contentPadding = buttonContentPadding,
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = colorScheme.primaryContainer,
-                        contentColor = colorScheme.onPrimaryContainer,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorScheme.primary,
+                        contentColor = colorScheme.onPrimary,
                     ),
                 ) {
                     Icon(
