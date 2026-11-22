@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
@@ -36,7 +37,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -44,13 +49,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.AndroidUser
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
 import com.eynnzerr.telemetrycleaner.ui.cleaner.statusTone
-import com.eynnzerr.telemetrycleaner.ui.components.CleanerSheetLayout
 import com.eynnzerr.telemetrycleaner.ui.components.PackageNameText
 import com.eynnzerr.telemetrycleaner.ui.components.SegmentedListDefaults
 import com.eynnzerr.telemetrycleaner.ui.components.SheetHeader
@@ -61,6 +66,24 @@ import com.eynnzerr.telemetrycleaner.ui.components.installationStatusLabel
 import com.eynnzerr.telemetrycleaner.ui.components.label
 import com.eynnzerr.telemetrycleaner.ui.components.segmentedItemShape
 import kotlinx.coroutines.launch
+
+/**
+ * Consumes residual vertical scroll and fling momentum from the details pager so scrolling
+ * inside the overview or permissions list never drags, bounces, or dismisses the modal sheet.
+ * Dismissing by dragging the handle, header, or tab bar remains enabled.
+ */
+private val BlockVerticalSheetNestedScroll = object : NestedScrollConnection {
+    override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: NestedScrollSource,
+    ): Offset = Offset(x = 0f, y = available.y)
+
+    override suspend fun onPostFling(
+        consumed: Velocity,
+        available: Velocity,
+    ): Velocity = Velocity(x = 0f, y = available.y)
+}
 
 /**
  * Shows the package overview and permissions in a full-viewport sheet with a lightweight top close button
@@ -74,15 +97,29 @@ internal fun PackageDetailsSheetContent(
     showPermissionsInitially: Boolean = false,
     placeholder: @Composable () -> Unit = {},
 ) {
-    CleanerSheetLayout(Modifier.fillMaxHeight(0.84f)) {
-        SheetHeader(R.string.details_title, onClose = onDismiss)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .fillMaxHeight(0.84f),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(Modifier.padding(horizontal = 24.dp)) {
+            SheetHeader(R.string.details_title, onClose = onDismiss)
+        }
         val result = snapshot?.packages?.firstOrNull { it.entry.packageName == packageName }
         if (result != null) {
             key(packageName) {
                 DetailPages(result, snapshot, showPermissionsInitially, Modifier.weight(1f))
             }
         } else {
-            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 placeholder()
             }
         }
@@ -101,7 +138,9 @@ private fun DetailPages(
     val scope = rememberCoroutineScope()
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
         ) {
             TonalToggleButton(
@@ -121,13 +160,19 @@ private fun DetailPages(
                 Text(stringResource(R.string.details_permissions_tab), maxLines = 1)
             }
         }
-        HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
+        HorizontalPager(
+            state = pager,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .nestedScroll(BlockVerticalSheetNestedScroll),
+        ) { page ->
             if (page == 0) {
                 Column(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(top = 4.dp, bottom = 8.dp),
+                        .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     DetailFields(result, snapshot.users)

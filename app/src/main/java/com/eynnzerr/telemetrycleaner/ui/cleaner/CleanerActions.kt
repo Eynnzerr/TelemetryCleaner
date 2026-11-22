@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,7 +28,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -40,9 +38,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
@@ -125,7 +126,7 @@ internal fun AnimatedSelectionBar(
         visible = visible,
         modifier = modifier
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            .padding(horizontal = 12.dp, vertical = 16.dp),
         enter = slideInVertically(animationSpec = motion.defaultSpatialSpec()) { it / 2 } +
             scaleIn(animationSpec = motion.defaultSpatialSpec(), initialScale = 0.92f) +
             fadeIn(animationSpec = motion.fastEffectsSpec()),
@@ -153,35 +154,40 @@ private fun FloatingSelectionToolbar(
     enabled: Boolean,
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val isDark = colorScheme.surface.luminance() < 0.5f
     val count = state.selectedPackageNames.size
     val canRestore = state.targetsFor(PackageAction.RESTORE).isNotEmpty()
     val canUninstall = state.targetsFor(PackageAction.UNINSTALL).isNotEmpty()
+    val selectionA11yLabel = pluralStringResource(R.plurals.selected_components, count, count)
+    val buttonContentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
 
     HorizontalFloatingToolbar(
         expanded = true,
         colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
-            toolbarContainerColor = colorScheme.surfaceContainerHighest,
+            toolbarContainerColor = if (isDark) {
+                colorScheme.surfaceContainerHigh
+            } else {
+                colorScheme.surfaceContainerLowest
+            },
             toolbarContentColor = colorScheme.onSurface,
         ),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        expandedShadowElevation = 6.dp,
+        collapsedShadowElevation = 6.dp,
+        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
         leadingContent = {
-            Surface(
-                modifier = Modifier.padding(end = 8.dp),
-                shape = RoundedCornerShape(50),
-                color = colorScheme.secondaryContainer,
-                contentColor = colorScheme.onSecondaryContainer,
-            ) {
-                Text(
-                    text = pluralStringResource(R.plurals.selected_components, count, count),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLargeEmphasized,
-                    maxLines = 1,
-                )
-            }
+            Text(
+                text = pluralStringResource(R.plurals.selected_components_short, count, count),
+                modifier = Modifier
+                    .padding(end = 12.dp)
+                    .semantics { contentDescription = selectionA11yLabel },
+                style = MaterialTheme.typography.titleSmallEmphasized,
+                color = colorScheme.onSurface,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
         },
-        trailingContent = {
-            Spacer(Modifier.width(2.dp))
-        },
+        trailingContent = {},
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -192,14 +198,23 @@ private fun FloatingSelectionToolbar(
                     onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.RESTORE)) },
                     enabled = enabled,
                     shapes = ButtonDefaults.shapes(),
+                    contentPadding = buttonContentPadding,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = colorScheme.primaryContainer,
+                        contentColor = colorScheme.onPrimaryContainer,
+                    ),
                 ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_restore),
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.restore), maxLines = 1)
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = stringResource(R.string.restore),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
             if (canUninstall) {
@@ -207,6 +222,7 @@ private fun FloatingSelectionToolbar(
                     onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.UNINSTALL)) },
                     enabled = enabled,
                     shapes = ButtonDefaults.shapes(),
+                    contentPadding = buttonContentPadding,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = colorScheme.error,
                         contentColor = colorScheme.onError,
@@ -217,8 +233,12 @@ private fun FloatingSelectionToolbar(
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.uninstall), maxLines = 1)
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = stringResource(R.string.uninstall),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
         }

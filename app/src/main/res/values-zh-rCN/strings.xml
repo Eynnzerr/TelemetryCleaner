@@ -175,6 +175,9 @@
     <plurals name="selected_components">
         <item quantity="other">已选择 %d 个组件</item>
     </plurals>
+    <plurals name="selected_components_short">
+        <item quantity="other">已选 %d 项</item>
+    </plurals>
     <string name="details_title">组件详情</string>
     <string name="details_load_failed">无法读取 %1$s 的详情。</string>
     <string name="details_overview_tab">概览</string>

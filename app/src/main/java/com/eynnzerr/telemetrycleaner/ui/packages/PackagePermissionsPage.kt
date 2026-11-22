@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -55,12 +57,18 @@ import com.eynnzerr.telemetrycleaner.ui.components.segmentedItemShape
 internal fun PackagePermissionsPage(result: DetectedPackage, users: List<AndroidUser>, currentUserId: Int) {
     val permissions = result.permissions
     if (permissions.isNullOrEmpty()) {
-        Text(
-            stringResource(if (permissions == null) R.string.details_permissions_unavailable else R.string.details_permissions_empty),
-            modifier = Modifier.padding(top = 8.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+        ) {
+            Text(
+                stringResource(if (permissions == null) R.string.details_permissions_unavailable else R.string.details_permissions_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         return
     }
 
@@ -73,7 +81,7 @@ internal fun PackagePermissionsPage(result: DetectedPackage, users: List<Android
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
+        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap),
     ) {
         item(key = "permissions_header") {

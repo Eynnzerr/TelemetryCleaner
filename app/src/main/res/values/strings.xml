@@ -180,6 +180,10 @@
         <item quantity="one">%d component selected</item>
         <item quantity="other">%d components selected</item>
     </plurals>
+    <plurals name="selected_components_short">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
     <string name="details_title">Component details</string>
     <string name="details_load_failed">Could not load details for %1$s.</string>
     <string name="details_overview_tab">Overview</string>
