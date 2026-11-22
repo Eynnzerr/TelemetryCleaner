@@ -1,19 +1,24 @@
 package com.eynnzerr.telemetrycleaner.data
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
 import android.os.UserHandle
 import android.os.UserManager
-import android.util.Log
 import androidx.annotation.MainThread
 import com.eynnzerr.telemetrycleaner.BuildConfig
+import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageCommands
+import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageFallback
+import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageFallbackResult
+import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageReading
+import com.eynnzerr.telemetrycleaner.data.packagemanager.PrivilegeSessionManager
+import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupHistoryStore
+import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupRemoval
+import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -23,11 +28,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import rikka.shizuku.Shizuku
 
 /**
  * Results of one background check against a fresh package-manager snapshot.
@@ -42,32 +46,25 @@ internal data class AutoCleanupResult(
     val hasUnverifiedPackages: Boolean = false,
 )
 
-/** Owns the app's shared privilege connection and executes the carrier catalogue's package operations. */
-class CleanerRepository internal constructor(context: Context, private val settings: CleanerSettings) {
+/** Signals a persisted change to the user's custom package directory. */
+internal sealed interface CustomPackageChange {
+    data class Added(val packageName: String) : CustomPackageChange
+    data class Removed(val packageName: String) : CustomPackageChange
+}
+
+/** Coordinates package queries, manual mutations, custom directory edits, and background cleanup. */
+class CleanerRepository internal constructor(
+    context: Context,
+    private val settings: CleanerSettings,
+    private val sessionManager: PrivilegeSessionManager,
+) {
     private val appContext = context.applicationContext
 
     /** Resolves stable Android profile identities independently of the package dump. */
     private val userManager = appContext.getSystemService(UserManager::class.java)
 
-    /** Serializes scans, changes and backend selection across the screen and service. */
-    private val packageMutex = Mutex()
-
-    /** Orders backend switching and Root connection attempts. */
-    private val backendMutex = Mutex()
-
-    /** Keeps a foreground-authorized session alive across screen and service recreation. */
-    private val connectionScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-
-    /** The process-local Root session, replaced while holding the package lock. */
-    private var rootExecutor: RootPackageExecutor? = null
-
-    /** Prevents Shizuku callbacks from publishing a connection before loading the saved backend. */
-    private var selectionLoaded = false
-
-    /** Holds the current choice and authorization state as one snapshot. */
-    private val mutableConnection = MutableStateFlow(
-        PrivilegeConnection(PrivilegeBackend.SHIZUKU, PrivilegeStatus.CONNECTING),
-    )
+    /** Serializes custom list edits with confirmed manual package changes. */
+    private val customPackagesMutex = Mutex()
 
     /** The APK that app_process loads for the privileged uninstall fallback. */
     private val fallbackApkPath: String? by lazy {
@@ -80,7 +77,7 @@ class CleanerRepository internal constructor(context: Context, private val setti
     }
 
     /** The selected backend and its current authorization state. */
-    val connection: StateFlow<PrivilegeConnection> = mutableConnection.asStateFlow()
+    val connection: StateFlow<PrivilegeConnection> get() = sessionManager.connection
 
     /** Shares background mutations with the screen. */
     private val automaticChangesFlow = MutableSharedFlow<Unit>(
@@ -91,108 +88,106 @@ class CleanerRepository internal constructor(context: Context, private val setti
     /** Signals that background cleanup may have changed the screen's snapshot. */
     internal val automaticChanges: SharedFlow<Unit> = automaticChangesFlow.asSharedFlow()
 
-    private val binderReceived = Shizuku.OnBinderReceivedListener { refreshConnection() }
-    private val binderDead = Shizuku.OnBinderDeadListener { refreshConnection() }
-    private val permissionResult = Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
-        if (requestCode == PERMISSION_REQUEST) refreshConnection()
-    }
+    /** Shares custom directory edits across ViewModels so the cleaner stays synchronized. */
+    private val customPackageChangesFlow = MutableSharedFlow<CustomPackageChange>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.SUSPEND,
+    )
 
-    /** Loads the persisted choice once without requesting Root from a service or boot receiver. */
-    private val loadSelection = connectionScope.launch {
-        val backend = settings.readPreferences().privilegeBackend
-        selectionLoaded = true
-        mutableConnection.value = disconnectedConnection(backend)
-    }
+    /** Emits after a custom package addition or removal is persisted. */
+    internal val customPackageChanges: SharedFlow<CustomPackageChange> = customPackageChangesFlow.asSharedFlow()
 
-    init {
-        Shizuku.addBinderDeadListener(binderDead)
-        Shizuku.addRequestPermissionResultListener(permissionResult)
-        Shizuku.addBinderReceivedListenerSticky(binderReceived)
-    }
+    /** Holds the most recent interactive scan so other screens (e.g. search) can reuse visible entries. */
+    private val mutableLatestSnapshot = MutableStateFlow<ScanSnapshot?>(null)
+
+    /** The latest completed interactive scan snapshot, if any. */
+    internal val latestSnapshot: StateFlow<ScanSnapshot?> = mutableLatestSnapshot.asStateFlow()
 
     /** Rechecks Shizuku or the existing Root session without requesting authorization. */
     @MainThread
-    fun refreshConnection() {
-        if (!selectionLoaded) return
-        val current = connection.value
-        when (current.backend) {
-            PrivilegeBackend.SHIZUKU -> mutableConnection.value = current.copy(status = shizukuStatus())
-            PrivilegeBackend.ROOT -> if (current.status == PrivilegeStatus.READY && rootExecutor?.isAlive() != true) {
-                mutableConnection.compareAndSet(current, current.copy(status = PrivilegeStatus.STOPPED))
-            }
-        }
-    }
+    fun refreshConnection() = sessionManager.refreshConnection()
 
     /** Saves the foreground user's choice and opens Root when selected. */
-    suspend fun selectBackend(backend: PrivilegeBackend): Boolean = withContext(Dispatchers.Main.immediate) {
-        loadSelection.join()
-        backendMutex.withLock backendChange@{
-            if (connection.value.backend != backend) {
-                val saved = packageMutex.withLock {
-                    withContext(NonCancellable) {
-                        if (!settings.setPrivilegeBackend(backend)) return@withContext false
-                        val previousRoot = rootExecutor
-                        rootExecutor = null
-                        mutableConnection.value = disconnectedConnection(backend)
-                        previousRoot?.close()
-                        true
-                    }
-                }
-                if (!saved) return@backendChange false
-            }
-            if (backend == PrivilegeBackend.ROOT) connectRoot()
-            true
-        }
-    }
+    suspend fun selectBackend(backend: PrivilegeBackend): Boolean = sessionManager.selectBackend(backend)
 
     /** Starts the selected authorization flow from the foreground. */
-    suspend fun requestPermission(): Unit = withContext(Dispatchers.Main.immediate) {
-        loadSelection.join()
-        val current = connection.value
-        when (current.backend) {
-            PrivilegeBackend.ROOT -> connectRoot()
-            PrivilegeBackend.SHIZUKU -> if (current.status == PrivilegeStatus.PERMISSION_REQUIRED) {
-                try {
-                    Shizuku.requestPermission(PERMISSION_REQUEST)
-                } catch (_: RuntimeException) {
-                    refreshConnection()
-                }
-            }
-        }
-    }
-
-    /** Opens one Root session outside the package lock so authorization cannot hold up an operation. */
-    @MainThread
-    private fun connectRoot() {
-        val current = connection.value
-        if (current.status == PrivilegeStatus.CONNECTING || current.status == PrivilegeStatus.READY) return
-        val connecting = current.copy(status = PrivilegeStatus.CONNECTING)
-        mutableConnection.value = connecting
-        connectionScope.launch {
-            backendMutex.withLock {
-                if (connection.value != connecting) return@withLock
-                val executor = withContext(Dispatchers.IO) {
-                    try {
-                        RootPackageExecutor.open()
-                    } catch (failure: Exception) {
-                        Log.w(TAG, "Unable to open a Root session", failure)
-                        null
-                    }
-                }
-                packageMutex.withLock {
-                    rootExecutor?.close()
-                    rootExecutor = executor
-                    mutableConnection.value = connecting.copy(
-                        status = if (executor == null) PrivilegeStatus.ERROR else PrivilegeStatus.READY,
-                    )
-                }
-            }
-        }
-    }
+    suspend fun requestPermission() = sessionManager.requestPermission()
 
     /** Reads active package records for the app's Android user and other visible spaces. */
-    suspend fun scan(): ScanSnapshot = withPackageCommands { commands, _ ->
-        scanPackages(commands, PackageDirectory.variants.keys, appContext.packageManager)
+    suspend fun scan(): ScanSnapshot = sessionManager.withPackageCommands { commands, _ ->
+        val manager = appContext.packageManager
+        val customEntries = settings.readPreferences().customPackageNames.sorted().map(::customEntry)
+        scanPackages(commands, PackageDirectory.variants.values + customEntries, manager).also {
+            mutableLatestSnapshot.value = it
+        }
+    }
+
+    /** Discovers device packages for searches by package name or local application label. */
+    suspend fun discoverPackages(): List<PackageEntry> = sessionManager.withPackageCommands { commands, _ ->
+        val names = commands.listPackageNames(Process.myUid() / PER_USER_RANGE)
+        val manager = appContext.packageManager
+        val applications = try {
+            manager.getInstalledApplications(PackageManager.MATCH_UNINSTALLED_PACKAGES).associateBy { it.packageName }
+        } catch (_: SecurityException) {
+            emptyMap()
+        }
+        names.map { name -> customEntry(name, applications[name]) }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, PackageEntry::displayName).thenBy(PackageEntry::packageName))
+    }
+
+    /** Reads the same exact record as a manual scan. Only confirmed absence returns null. */
+    internal suspend fun lookupPackage(packageName: String): PackageEntry? = sessionManager.withPackageCommands { commands, _ ->
+        require(isExactPackageName(packageName))
+        when (val reading = commands.read(packageName)) {
+            is PackageReading.Found -> PackageDirectory.variants[packageName] ?: customEntry(packageName)
+            PackageReading.Missing -> null
+            is PackageReading.Unavailable -> error("Could not read $packageName: ${reading.issue}")
+        }
+    }
+
+    /** Reads the selected package's details and permissions across the visible spaces. */
+    internal suspend fun loadPackageDetails(packageName: String): ScanSnapshot = sessionManager.withPackageCommands { commands, _ ->
+        val entry = PackageDirectory.variants[packageName] ?: customEntry(packageName)
+        scanPackages(commands, listOf(entry), appContext.packageManager)
+    }
+
+    /** Changes directory membership without changing package installation or automatic cleanup. */
+    suspend fun setCustomPackage(packageName: String, included: Boolean): Boolean {
+        val saved = customPackagesMutex.withLock {
+            packageName !in PackageDirectory.variants && settings.setCustomPackage(packageName, included)
+        }
+        if (saved) {
+            if (!included) {
+                mutableLatestSnapshot.update { snapshot ->
+                    snapshot?.copy(packages = snapshot.packages.filterNot { it.entry.packageName == packageName })
+                }
+            }
+            val change = if (included) {
+                CustomPackageChange.Added(packageName)
+            } else {
+                CustomPackageChange.Removed(packageName)
+            }
+            customPackageChangesFlow.emit(change)
+        }
+        return saved
+    }
+
+    /** Resolves an optional application label for a package already identified by the privileged service. */
+    private fun customEntry(packageName: String): PackageEntry {
+        val info = try {
+            appContext.packageManager.getApplicationInfo(packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES)
+        } catch (_: PackageManager.NameNotFoundException) {
+            null
+        } catch (_: SecurityException) {
+            null
+        }
+        return customEntry(packageName, info)
+    }
+
+    /** Other Android users' packages may be visible to the privileged service only by name. */
+    private fun customEntry(packageName: String, info: ApplicationInfo?): PackageEntry {
+        val label = info?.loadLabel(appContext.packageManager)?.toString()?.takeIf(String::isNotBlank)
+        return PackageEntry(packageName, label ?: packageName, emptySet())
     }
 
     /** Applies the confirmed manual actions serially, optionally trying to disable retained packages. */
@@ -202,20 +197,26 @@ class CleanerRepository internal constructor(context: Context, private val setti
         disableOnUninstallFailure: Boolean = true,
         expectedBackend: PrivilegeBackend? = null,
     ): List<ChangeOutcome> =
-        withPackageCommands { commands, backend ->
+        sessionManager.withPackageCommands { commands, backend ->
             check(expectedBackend == null || expectedBackend == backend)
-            targets.distinct().map { target ->
-                currentCoroutineContext().ensureActive()
-                val outcome = changePackage(
-                    commands,
-                    backend,
-                    target,
-                    action,
-                    requireVerifiedSystemIdentity = false,
-                    disableOnUninstallFailure = disableOnUninstallFailure,
-                )
-                val denialLog = outcome.denialLog
-                if (denialLog == null) outcome else outcome.copy(denialLog = denialContext(target, backend) + denialLog)
+            customPackagesMutex.withLock {
+                val managedNames = PackageDirectory.variants.keys + settings.readPreferences().customPackageNames
+                targets.distinct().map { target ->
+                    currentCoroutineContext().ensureActive()
+                    if (target.packageName !in managedNames) {
+                        return@map ChangeOutcome(target, false, ChangeFailure.NotManaged)
+                    }
+                    val outcome = changePackage(
+                        commands,
+                        backend,
+                        target,
+                        action,
+                        requireVerifiedSystemIdentity = false,
+                        disableOnUninstallFailure = disableOnUninstallFailure,
+                    )
+                    val denialLog = outcome.denialLog
+                    if (denialLog == null) outcome else outcome.copy(denialLog = denialContext(target, backend) + denialLog)
+                }
             }
         }
 
@@ -224,13 +225,13 @@ class CleanerRepository internal constructor(context: Context, private val setti
         history: AutoCleanupHistoryStore,
         expectedBackend: PrivilegeBackend,
     ): AutoCleanupResult =
-        withPackageCommands { commands, backend ->
+        sessionManager.withPackageCommands { commands, backend ->
             check(backend == expectedBackend)
             val operationContext = currentCoroutineContext()
             if (!settings.readPreferences().autoCleanupEnabled) {
                 return@withPackageCommands AutoCleanupResult(hasSpaces = false, outcomes = emptyList())
             }
-            val snapshot = scanPackages(commands, PackageDirectory.autoCleanupNames)
+            val snapshot = scanPackages(commands, PackageDirectory.autoCleanupNames.map(PackageDirectory.variants::getValue))
             val users = snapshot.users.associateBy(AndroidUser::id)
             val spaces = settings.readPreferences().selectedUsers(snapshot)
             val targets = snapshot.targetsFor(PackageAction.UNINSTALL, spaces)
@@ -270,35 +271,14 @@ class CleanerRepository internal constructor(context: Context, private val setti
             }
         }
 
-    /** Resolves one ready backend under the operation lock and holds it for the whole operation. */
-    private suspend fun <T> withPackageCommands(
-        operation: suspend (PackageCommands, PrivilegeBackend) -> T,
-    ): T = withContext(Dispatchers.IO) {
-        packageMutex.withLock {
-            val current = connection.value
-            val executor = when (current.backend) {
-                PrivilegeBackend.SHIZUKU -> PackageBinder
-                PrivilegeBackend.ROOT -> rootExecutor
-            }
-            try {
-                check(current.status == PrivilegeStatus.READY && executor != null)
-                operation(PackageCommands(executor), current.backend)
-            } finally {
-                if (current.status == PrivilegeStatus.READY && executor is RootPackageExecutor && !executor.isAlive()) {
-                    mutableConnection.compareAndSet(current, current.copy(status = PrivilegeStatus.STOPPED))
-                }
-            }
-        }
-    }
-
     /** Reads a current snapshot while the caller holds the shared operation lock. */
     private suspend fun scanPackages(
         commands: PackageCommands,
-        packageNames: Set<String>,
+        entries: Collection<PackageEntry>,
         permissionManager: PackageManager? = null,
     ): ScanSnapshot {
         // Android allocates a range of 100,000 UIDs to each user, including profiles.
-        val snapshot = commands.scan(Process.myUid() / PER_USER_RANGE, packageNames, permissionManager)
+        val snapshot = commands.scan(Process.myUid() / PER_USER_RANGE, entries, permissionManager)
         return snapshot.copy(users = snapshot.users.map { it.copy(serialNumber = userSerialNumber(it.id)) })
     }
 
@@ -320,8 +300,8 @@ class CleanerRepository internal constructor(context: Context, private val setti
         disableOnUninstallFailure: Boolean = false,
         canSubmit: suspend () -> Boolean = { true },
     ): ChangeOutcome = try {
-        if (backend == PrivilegeBackend.SHIZUKU && !Shizuku.pingBinder()) {
-            ChangeOutcome(target, false, "Shizuku 已断开。")
+        if (backend == PrivilegeBackend.SHIZUKU && !sessionManager.isShizukuBinderAlive()) {
+            ChangeOutcome(target, false, ChangeFailure.ShizukuDisconnected)
         } else {
             commands.change(
                 target = target,
@@ -334,11 +314,11 @@ class CleanerRepository internal constructor(context: Context, private val setti
             )
         }
     } catch (_: SecurityException) {
-        ChangeOutcome(target, false, "系统拒绝了对该空间的操作。")
+        ChangeOutcome(target, false, ChangeFailure.SpaceOperationDenied)
     } catch (cancellation: CancellationException) {
         throw cancellation
     } catch (_: Exception) {
-        ChangeOutcome(target, false, "无法确认组件状态。请刷新后重试。")
+        ChangeOutcome(target, false, ChangeFailure.StateUnverified)
     }
 
     /** Runs the existing shell UID uninstall fallback through Shizuku. */
@@ -352,10 +332,7 @@ class CleanerRepository internal constructor(context: Context, private val setti
         val noUninstallApps = runCatching {
             userManager?.getUserRestrictions(handle)?.getBoolean(UserManager.DISALLOW_UNINSTALL_APPS)
         }.getOrNull()
-        val uid = when (backend) {
-            PrivilegeBackend.SHIZUKU -> runCatching { Shizuku.getUid().takeIf { it >= 0 } }.getOrNull()
-            PrivilegeBackend.ROOT -> 0
-        }
+        val uid = sessionManager.currentUid(backend)
         appendLine("TelemetryCleaner ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}")
         appendLine("Build: ${Build.DISPLAY} (${Build.FINGERPRINT})")
@@ -363,40 +340,7 @@ class CleanerRepository internal constructor(context: Context, private val setti
         appendLine("Effective no_uninstall_apps for user ${target.userId}: ${noUninstallApps ?: "unknown"}")
     }
 
-    /** Restores the selected backend without opening a Root session. */
-    private fun disconnectedConnection(backend: PrivilegeBackend): PrivilegeConnection =
-        PrivilegeConnection(
-            backend,
-            if (backend == PrivilegeBackend.SHIZUKU) shizukuStatus() else PrivilegeStatus.STOPPED,
-        )
-
-    /** Resolves the current Shizuku connection and permission state. */
-    private fun shizukuStatus(): PrivilegeStatus = try {
-        when {
-            !Shizuku.pingBinder() -> unavailableShizukuStatus()
-            Shizuku.isPreV11() -> PrivilegeStatus.ERROR
-            Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> PrivilegeStatus.PERMISSION_REQUIRED
-            else -> PrivilegeStatus.READY
-        }
-    } catch (_: RuntimeException) {
-        if (Shizuku.pingBinder()) PrivilegeStatus.ERROR else unavailableShizukuStatus()
-    }
-
-    /** Distinguishes an absent Shizuku installation from a stopped connection. */
-    private fun unavailableShizukuStatus(): PrivilegeStatus =
-        try {
-            appContext.packageManager.getApplicationInfo(SHIZUKU_PACKAGE, 0)
-            PrivilegeStatus.STOPPED
-        } catch (_: PackageManager.NameNotFoundException) {
-            PrivilegeStatus.MISSING
-        }
-
     private companion object {
-        /** Identifies backend connection failures in logcat. */
-        const val TAG = "CleanerRepository"
-
-        const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
-        const val PERMISSION_REQUEST = 31
         const val PER_USER_RANGE = 100_000
     }
 }

@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="freeze_only">Disable only</string>
+    <string name="freeze_title">Disable components</string>
+    <string name="freeze_description">This disables the selected components in the spaces shown below and keeps their app data.</string>
+    <string name="freeze_action">Disable</string>
     <string name="app_name">Telemetry Cleaner</string>
     <string name="carrier_unicom">China Unicom</string>
     <string name="carrier_telecom">China Telecom</string>
@@ -20,7 +24,7 @@
         <item quantity="other">%1$d minutes</item>
     </plurals>
     <string name="settings_history_description">Recent checks and removal results</string>
-    <string name="settings_directory_description">Supported manufacturers and components</string>
+    <string name="settings_directory_description">Bundled components and your added packages</string>
     <string name="settings_version">Version</string>
     <string name="settings_version_description">%1$s · Check for updates</string>
     <string name="settings_version_checking">Checking GitHub Releases…</string>
@@ -109,6 +113,7 @@
     <string name="select_all">Select all</string>
     <string name="deselect_all">Deselect all</string>
     <string name="section_previous_results">Last scan</string>
+    <string name="manufacturer_oppo" translatable="false">OPPO</string>
     <string name="manufacturer_xiaomi" translatable="false">XiaoMi</string>
     <string name="scope_spaces">Scan scope</string>
     <string name="scope_unavailable">Complete a scan to see available spaces.</string>
@@ -141,7 +146,7 @@
     <string name="auto_cleanup_history_check_incomplete">Check or removal incomplete</string>
     <string name="auto_cleanup_history_check_no_spaces">No spaces available to check</string>
     <string name="auto_cleanup_history_check_interrupted">Check interrupted</string>
-    <string name="package_directory_title">Bundled component directory</string>
+    <string name="package_directory_title">Component directory</string>
     <string name="package_directory_feedback">To suggest an addition or share feedback, open an <annotation link="issues">issue</annotation>.</string>
     <string name="package_family_cross_vendor">Multiple manufacturers</string>
     <string name="package_family_color_os">OPPO / OnePlus / realme</string>
@@ -176,6 +181,7 @@
         <item quantity="other">%d components selected</item>
     </plurals>
     <string name="details_title">Component details</string>
+    <string name="details_load_failed">Could not load details for %1$s.</string>
     <string name="details_overview_tab">Overview</string>
     <string name="details_permissions_tab">Permissions</string>
     <string name="details_permissions_explanation">Android’s package manager reports permission requests and grants for each space. Confirming data access or transfers requires observing the component’s behavior.</string>
@@ -199,7 +205,6 @@
     <string name="confirm_uninstall">Uninstall components</string>
     <string name="confirm_restore">Restore components</string>
     <string name="uninstall_description">This uninstalls the components from the selected spaces and clears their local data.</string>
-    <string name="uninstall_untested_warning">Uninstalling components from %1$s has not been tested. Their behavior after uninstall is uncertain. Review the risks carefully. If issues arise after uninstalling, you are responsible for the outcome.</string>
     <string name="restore_description">Disabled components will be re-enabled. Uninstalled components will be restored using the APK on this device.</string>
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>
@@ -211,5 +216,32 @@
     <string name="disabled_instead_result">Disabled after uninstall failed</string>
     <string name="restored_result">Restored</string>
     <string name="unverified_result">Could not verify the requested change</string>
+    <string name="change_error_not_managed">This component is no longer in the managed directory.</string>
+    <string name="change_error_shizuku_disconnected">Shizuku disconnected.</string>
+    <string name="change_error_space_operation_denied">The system rejected this operation for the selected space.</string>
+    <string name="change_error_state_unverified">Could not confirm component state. Refresh and try again.</string>
+    <string name="change_error_identity_unverified">Could not confirm component identity. Refresh and try again.</string>
+    <string name="change_error_system_identity_not_verified">This package did not pass system identity verification.</string>
+    <string name="change_error_space_state_unverified">Could not confirm component state for this space.</string>
+    <string name="change_error_disabled_by_system">This component was disabled by the system and cannot be re-enabled.</string>
+    <string name="change_error_not_enabled_in_space">This component is not enabled in this space.</string>
+    <string name="change_error_no_restorable_copy">No restorable APK copy is available on this device.</string>
+    <string name="change_error_post_change_state_unverified">Could not confirm state after the operation. Refresh and try again.</string>
+    <string name="change_error_operation_denied">The system rejected this operation.</string>
+    <string name="change_error_state_unchanged">The component state did not change after the system responded.</string>
     <string name="main_space">Main space</string>
+    <string name="package_search_title">Search packages</string>
+    <string name="package_search_hint">App or package name</string>
+    <string name="package_search_needs_connection">Connect to Shizuku or Root to search the device.</string>
+    <string name="package_search_failed">Could not load the package list. You can still search by exact package name.</string>
+    <string name="package_search_exact_failed">Could not verify this package name.</string>
+    <string name="package_search_exact_missing">Package %1$s was not found on this device.</string>
+    <string name="package_search_bundled">In bundled directory</string>
+    <string name="package_search_no_matches">No matching packages.</string>
+    <string name="package_search_add">Add</string>
+    <string name="package_search_added">Added</string>
+    <string name="section_custom_packages">Custom packages</string>
+    <string name="package_type_system">System app</string>
+    <string name="package_type_user">User app</string>
+    <string name="remove_from_directory">Remove from directory</string>
 </resources>

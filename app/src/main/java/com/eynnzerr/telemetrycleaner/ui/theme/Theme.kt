@@ -15,7 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
-import com.eynnzerr.telemetrycleaner.data.ThemePalette
+import com.eynnzerr.telemetrycleaner.data.preferences.ThemePalette
 
 private val LightColorScheme = lightColorScheme(
     primary = LightPrimary,
