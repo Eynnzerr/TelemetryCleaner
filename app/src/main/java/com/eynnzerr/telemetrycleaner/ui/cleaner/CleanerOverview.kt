@@ -4,7 +4,19 @@ package com.eynnzerr.telemetrycleaner.ui.cleaner
 
 import android.content.Intent
 import android.net.Uri
+import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,10 +24,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -23,19 +37,29 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.PackageState
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
 import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerActivity
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerError
@@ -46,22 +70,46 @@ import com.eynnzerr.telemetrycleaner.ui.components.ExpressiveButtonSize
 import com.eynnzerr.telemetrycleaner.ui.components.PackageLoadingIndicator
 import com.eynnzerr.telemetrycleaner.ui.components.statusLabel
 
-/** Shows the selected privilege backend, its next action, and the scan summary with expressive color & shape hierarchy. */
-@Composable
-internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) {
-    val context = LocalContext.current
-    val colors = MaterialTheme.colorScheme
-    val snapshot = state.snapshot
-    val (backend, status) = state.connection
-    val isRoot = backend == PrivilegeBackend.ROOT
-    val ready = status == PrivilegeStatus.READY
-    val busy = state.activity != CleanerActivity.IDLE || status == PrivilegeStatus.CONNECTING
+/** Captures the semantic status shown by [SummaryCard] so off-screen changes can trigger the floating pill. */
+internal data class SummaryStatusKey(
+    val connection: PrivilegeConnection,
+    val activity: CleanerActivity,
+    val installedCount: Int?,
+    val hasIncompleteResults: Boolean,
+    val noSpacesSelected: Boolean,
+    val hasSnapshot: Boolean,
+    val error: CleanerError?,
+)
+
+/**
+ * Pure state machine deciding when the top floating status capsule should be visible:
+ * it stays hidden while the summary card is visible (or merely scrolled away without changes),
+ * appears whenever status changes while the summary card is off-screen, and disappears as soon
+ * as the summary card returns into view.
+ */
+internal data class FloatingStatusVisibilityState(
+    val visible: Boolean,
+    val lastSeenStatus: SummaryStatusKey,
+) {
+    fun reduce(
+        currentStatus: SummaryStatusKey,
+        isSummaryVisible: Boolean,
+    ): FloatingStatusVisibilityState = when {
+        isSummaryVisible -> copy(visible = false, lastSeenStatus = currentStatus)
+        currentStatus != lastSeenStatus -> copy(visible = true, lastSeenStatus = currentStatus)
+        else -> this
+    }
+}
+
+/** Derives a comparable status fingerprint for [SummaryCard] and [AnimatedFloatingStatusPill]. */
+internal fun CleanerState.summaryStatusKey(): SummaryStatusKey {
+    val ready = connection.status == PrivilegeStatus.READY
     val hasIncompleteResults = snapshot?.packages?.any { result ->
-        state.selectedUserIds.any { result.hasUnresolvedStatus(it) }
+        selectedUserIds.any { result.hasUnresolvedStatus(it) }
     } == true
-    val installedCount = if (ready && snapshot != null && state.selectedUserIds.isNotEmpty()) {
+    val installedCount = if (ready && snapshot != null && selectedUserIds.isNotEmpty()) {
         snapshot.packages.count { result ->
-            state.selectedUserIds.any { userId ->
+            selectedUserIds.any { userId ->
                 result.users[userId] == PackageState.INSTALLED ||
                     result.users[userId] == PackageState.DISABLED
             }
@@ -69,14 +117,50 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
     } else {
         null
     }
+    return SummaryStatusKey(
+        connection = connection,
+        activity = activity,
+        installedCount = installedCount,
+        hasIncompleteResults = hasIncompleteResults,
+        noSpacesSelected = ready && snapshot != null && selectedUserIds.isEmpty(),
+        hasSnapshot = snapshot != null,
+        error = error,
+    )
+}
+
+private enum class SummaryTone { ERROR, DISCONNECTED, ATTENTION, POSITIVE }
+
+private data class SummaryPresentation(
+    val summaryTitle: String,
+    val pillPrimaryText: String,
+    val pillSecondaryText: String?,
+    val connectionLabel: String,
+    val subtitle: Int?,
+    val cardTone: SummaryTone,
+    val pillTone: SummaryTone,
+    val busy: Boolean,
+    val ready: Boolean,
+    val isRoot: Boolean,
+    val installedCount: Int?,
+    val iconShape: Shape,
+)
+
+@Composable
+private fun summaryPresentation(state: CleanerState): SummaryPresentation {
+    val key = state.summaryStatusKey()
+    val (backend, status) = state.connection
+    val isRoot = backend == PrivilegeBackend.ROOT
+    val ready = status == PrivilegeStatus.READY
+    val busy = state.activity != CleanerActivity.IDLE || status == PrivilegeStatus.CONNECTING
+    val installedCount = key.installedCount
+    val hasIncompleteResults = key.hasIncompleteResults
+    val connectionLabel = stringResource(state.connection.statusLabel())
 
     val summaryTitle = when {
         state.activity == CleanerActivity.SWITCHING_BACKEND -> stringResource(R.string.switching_backend)
         state.activity == CleanerActivity.CHANGING -> stringResource(R.string.changing)
         state.activity == CleanerActivity.SCANNING -> stringResource(R.string.scanning)
-        ready && snapshot != null && state.selectedUserIds.isEmpty() -> {
-            stringResource(R.string.scope_empty)
-        }
+        key.noSpacesSelected -> stringResource(R.string.scope_empty)
         installedCount != null -> {
             if (installedCount == 0 && hasIncompleteResults) stringResource(R.string.summary_scan_incomplete)
             else pluralStringResource(R.plurals.installed_components, installedCount, installedCount)
@@ -98,7 +182,7 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
             PrivilegeStatus.CONNECTING -> if (isRoot) null else R.string.waiting_for_shizuku
             PrivilegeStatus.ERROR -> if (isRoot) R.string.root_error_explanation else null
             PrivilegeStatus.READY -> when {
-                snapshot == null && state.error == null -> R.string.scan_ready_description
+                state.snapshot == null && state.error == null -> R.string.scan_ready_description
                 hasIncompleteResults -> R.string.summary_scan_incomplete_description
                 else -> null
             }
@@ -107,44 +191,83 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
         null
     }
 
-    val (targetContainer, targetContent, targetBadgeBg) = when {
-        !busy && status == PrivilegeStatus.ERROR -> Triple(
-            colors.errorContainer,
-            colors.onErrorContainer,
-            colors.error.copy(alpha = 0.14f),
-        )
-        !busy && !ready -> Triple(
-            colors.surfaceContainerHigh,
-            colors.onSurface,
-            colors.surfaceContainerHighest,
-        )
-        !busy && installedCount != null && installedCount > 0 -> Triple(
-            colors.tertiaryContainer,
-            colors.onTertiaryContainer,
-            colors.tertiary.copy(alpha = 0.14f),
-        )
-        !busy && installedCount == 0 && !hasIncompleteResults -> Triple(
-            colors.primaryContainer,
-            colors.onPrimaryContainer,
-            colors.primary.copy(alpha = 0.14f),
-        )
-        else -> Triple(
-            colors.primaryContainer,
-            colors.onPrimaryContainer,
-            colors.primary.copy(alpha = 0.14f),
-        )
+    val cardTone = when {
+        !busy && status == PrivilegeStatus.ERROR -> SummaryTone.ERROR
+        !busy && !ready -> SummaryTone.DISCONNECTED
+        !busy && installedCount != null && installedCount > 0 -> SummaryTone.ATTENTION
+        else -> SummaryTone.POSITIVE
     }
-
-    val colorSpec = MaterialTheme.motionScheme.defaultEffectsSpec<androidx.compose.ui.graphics.Color>()
-    val containerColor by animateColorAsState(targetContainer, colorSpec, label = "heroContainer")
-    val contentColor by animateColorAsState(targetContent, colorSpec, label = "heroContent")
-    val badgeBgColor by animateColorAsState(targetBadgeBg, colorSpec, label = "heroBadgeBg")
+    val pillTone = if (!busy && state.error != null) SummaryTone.ERROR else cardTone
 
     val iconShape = when {
         installedCount != null && installedCount > 0 -> MaterialShapes.SoftBurst.toShape()
         ready && installedCount == 0 -> MaterialShapes.Cookie4Sided.toShape()
         else -> MaterialShapes.Clover4Leaf.toShape()
     }
+
+    val pillPrimaryText = when {
+        !busy && state.error != null -> stringResource(state.error.messageRes())
+        !busy && !ready && (status == PrivilegeStatus.ERROR || status == PrivilegeStatus.PERMISSION_REQUIRED || isRoot) ->
+            connectionLabel
+        else -> summaryTitle
+    }
+    val pillSecondaryText = if (!busy && state.error == null && installedCount != null) {
+        connectionLabel
+    } else {
+        null
+    }
+
+    return SummaryPresentation(
+        summaryTitle = summaryTitle,
+        pillPrimaryText = pillPrimaryText,
+        pillSecondaryText = pillSecondaryText,
+        connectionLabel = connectionLabel,
+        subtitle = subtitle,
+        cardTone = cardTone,
+        pillTone = pillTone,
+        busy = busy,
+        ready = ready,
+        isRoot = isRoot,
+        installedCount = installedCount,
+        iconShape = iconShape,
+    )
+}
+
+/** Shows the selected privilege backend, its next action, and the scan summary with expressive color & shape hierarchy. */
+@Composable
+internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit) {
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    val presentation = summaryPresentation(state)
+    val (_, status) = state.connection
+
+    val (targetContainer, targetContent, targetBadgeBg) = when (presentation.cardTone) {
+        SummaryTone.ERROR -> Triple(
+            colors.errorContainer,
+            colors.onErrorContainer,
+            colors.error.copy(alpha = 0.14f),
+        )
+        SummaryTone.DISCONNECTED -> Triple(
+            colors.surfaceContainerHigh,
+            colors.onSurface,
+            colors.surfaceContainerHighest,
+        )
+        SummaryTone.ATTENTION -> Triple(
+            colors.tertiaryContainer,
+            colors.onTertiaryContainer,
+            colors.tertiary.copy(alpha = 0.14f),
+        )
+        SummaryTone.POSITIVE -> Triple(
+            colors.primaryContainer,
+            colors.onPrimaryContainer,
+            colors.primary.copy(alpha = 0.14f),
+        )
+    }
+
+    val colorSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
+    val containerColor by animateColorAsState(targetContainer, colorSpec, label = "heroContainer")
+    val contentColor by animateColorAsState(targetContent, colorSpec, label = "heroContent")
+    val badgeBgColor by animateColorAsState(targetBadgeBg, colorSpec, label = "heroBadgeBg")
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -168,14 +291,14 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
                         contentColor = contentColor,
                     ) {
                         Text(
-                            text = stringResource(state.connection.statusLabel()),
+                            text = presentation.connectionLabel,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelLargeEmphasized,
                         )
                     }
                     Text(
-                        text = summaryTitle,
-                        style = if (installedCount != null && !busy) {
+                        text = presentation.summaryTitle,
+                        style = if (presentation.installedCount != null && !presentation.busy) {
                             MaterialTheme.typography.displaySmallEmphasized
                         } else {
                             MaterialTheme.typography.headlineLargeEmphasized
@@ -183,7 +306,7 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
                         modifier = Modifier.semantics { heading() },
                     )
                 }
-                if (busy) {
+                if (presentation.busy) {
                     PackageLoadingIndicator(
                         contained = true,
                         modifier = Modifier.align(Alignment.CenterVertically),
@@ -191,7 +314,7 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
                 } else {
                     Surface(
                         modifier = Modifier.size(76.dp),
-                        shape = iconShape,
+                        shape = presentation.iconShape,
                         color = badgeBgColor,
                         contentColor = contentColor,
                     ) {
@@ -206,20 +329,20 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
                     }
                 }
             }
-            if (subtitle != null) {
+            if (presentation.subtitle != null) {
                 Text(
-                    text = stringResource(subtitle),
+                    text = stringResource(presentation.subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = contentColor.copy(alpha = 0.85f),
                 )
             }
-            if (!busy && !ready) {
+            if (!presentation.busy && !presentation.ready) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     when {
-                        isRoot -> ExpressiveButton(
+                        presentation.isRoot -> ExpressiveButton(
                             label = when (status) {
                                 PrivilegeStatus.STOPPED -> R.string.connect_root
                                 PrivilegeStatus.PERMISSION_REQUIRED -> R.string.authorize
@@ -255,22 +378,181 @@ internal fun SummaryCard(state: CleanerState, onIntent: (CleanerIntent) -> Unit)
                             onIntent(CleanerIntent.Refresh)
                         }
                     }
-                    val alternative = if (isRoot) PrivilegeBackend.SHIZUKU else PrivilegeBackend.ROOT
+                    val alternative = if (presentation.isRoot) PrivilegeBackend.SHIZUKU else PrivilegeBackend.ROOT
                     TextButton(
                         onClick = { onIntent(CleanerIntent.SelectBackend(alternative)) },
                         shapes = ButtonDefaults.shapes(),
                         colors = ButtonDefaults.textButtonColors(contentColor = contentColor),
                     ) {
-                        Text(stringResource(if (isRoot) R.string.use_shizuku else R.string.use_root))
+                        Text(stringResource(if (presentation.isRoot) R.string.use_shizuku else R.string.use_root))
                     }
                 }
-            } else if (!busy && snapshot == null && state.error == null) {
+            } else if (!presentation.busy && state.snapshot == null && state.error == null) {
                 ExpressiveButton(
                     label = R.string.scan,
                     size = ExpressiveButtonSize.SMALL,
                     leadingIcon = R.drawable.ic_refresh,
                 ) {
                     onIntent(CleanerIntent.Refresh)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Floats an Expressive status capsule below the top bar when [SummaryCard] is scrolled out of view
+ * and the cleaner status changes; tapping returns to [SummaryCard] and dismisses the capsule.
+ */
+@Composable
+internal fun AnimatedFloatingStatusPill(
+    visible: Boolean,
+    state: CleanerState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val motion = MaterialTheme.motionScheme
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier.padding(top = 10.dp, start = 16.dp, end = 16.dp),
+        enter = slideInVertically(animationSpec = motion.defaultSpatialSpec()) { -it } +
+            scaleIn(animationSpec = motion.defaultSpatialSpec(), initialScale = 0.88f) +
+            fadeIn(animationSpec = motion.fastEffectsSpec()),
+        exit = slideOutVertically(animationSpec = motion.fastSpatialSpec()) { -it } +
+            scaleOut(animationSpec = motion.fastSpatialSpec(), targetScale = 0.88f) +
+            fadeOut(animationSpec = motion.fastEffectsSpec()),
+        label = "Top floating status capsule",
+    ) {
+        val lastVisibleState = remember { mutableStateOf(state) }
+        if (visible) {
+            SideEffect { lastVisibleState.value = state }
+        }
+        FloatingStatusPill(
+            state = if (visible) state else lastVisibleState.value,
+            onClick = onClick,
+        )
+    }
+}
+
+@Composable
+private fun FloatingStatusPill(
+    state: CleanerState,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val motion = MaterialTheme.motionScheme
+    val isDark = colors.surface.luminance() < 0.5f
+    val presentation = summaryPresentation(state)
+
+    val (targetContainer, targetContent, targetBadgeBg) = when (presentation.pillTone) {
+        SummaryTone.ERROR -> Triple(
+            colors.errorContainer,
+            colors.onErrorContainer,
+            colors.error.copy(alpha = 0.14f),
+        )
+        SummaryTone.DISCONNECTED -> Triple(
+            if (isDark) colors.surfaceContainerHighest else colors.surfaceContainerLowest,
+            colors.onSurface,
+            colors.surfaceContainerHigh,
+        )
+        SummaryTone.ATTENTION -> Triple(
+            colors.tertiaryContainer,
+            colors.onTertiaryContainer,
+            colors.tertiary.copy(alpha = 0.14f),
+        )
+        SummaryTone.POSITIVE -> Triple(
+            colors.primaryContainer,
+            colors.onPrimaryContainer,
+            colors.primary.copy(alpha = 0.14f),
+        )
+    }
+
+    val colorSpec = motion.defaultEffectsSpec<Color>()
+    val containerColor by animateColorAsState(targetContainer, colorSpec, label = "pillContainer")
+    val contentColor by animateColorAsState(targetContent, colorSpec, label = "pillContent")
+    val badgeBgColor by animateColorAsState(targetBadgeBg, colorSpec, label = "pillBadgeBg")
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = containerColor,
+        contentColor = contentColor,
+        shadowElevation = 6.dp,
+        border = BorderStroke(0.5.dp, contentColor.copy(alpha = 0.14f)),
+        modifier = Modifier
+            .widthIn(max = 560.dp)
+            .animateContentSize(animationSpec = motion.fastSpatialSpec())
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AnimatedContent(
+                targetState = presentation.busy,
+                transitionSpec = {
+                    fadeIn(motion.fastEffectsSpec()) togetherWith fadeOut(motion.fastEffectsSpec())
+                },
+                label = "pillIndicator",
+            ) { isBusy ->
+                if (isBusy) {
+                    LoadingIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = contentColor,
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier.size(24.dp),
+                        shape = presentation.iconShape,
+                        color = badgeBgColor,
+                        contentColor = contentColor,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = contentColor,
+                            )
+                        }
+                    }
+                }
+            }
+            AnimatedContent(
+                targetState = presentation.pillPrimaryText to presentation.pillSecondaryText,
+                transitionSpec = {
+                    (fadeIn(motion.fastEffectsSpec()) + slideInVertically(motion.fastSpatialSpec()) { it / 3 }) togetherWith
+                        fadeOut(motion.fastEffectsSpec())
+                },
+                label = "pillText",
+            ) { (primary, secondary) ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = primary,
+                        style = MaterialTheme.typography.titleSmallEmphasized,
+                        maxLines = 1,
+                        softWrap = secondary == null,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (secondary != null) {
+                        Text(
+                            text = "·",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = contentColor.copy(alpha = 0.55f),
+                        )
+                        Text(
+                            text = secondary,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = contentColor.copy(alpha = 0.78f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
                 }
             }
         }
@@ -286,21 +568,22 @@ internal fun CleanerErrorCard(error: CleanerError) {
         shape = RoundedCornerShape(20.dp),
     ) {
         Text(
-            text = stringResource(
-                when (error) {
-                    CleanerError.SCAN_FAILED -> R.string.scan_failed
-                    CleanerError.SCAN_SPACE_QUERY_FAILED -> R.string.scan_space_query_failed
-                    CleanerError.SCAN_SPACE_PERMISSION_DENIED -> R.string.scan_space_permission_denied
-                    CleanerError.SCAN_SPACE_RESPONSE_INVALID -> R.string.scan_space_response_invalid
-                    CleanerError.SCAN_CURRENT_SPACE_MISSING -> R.string.scan_current_space_missing
-                    CleanerError.ACTION_FAILED -> R.string.action_failed
-                    CleanerError.BACKEND_SELECTION_FAILED -> R.string.backend_selection_failed
-                },
-            ),
+            text = stringResource(error.messageRes()),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.fillMaxWidth().padding(16.dp),
         )
     }
+}
+
+@StringRes
+internal fun CleanerError.messageRes(): Int = when (this) {
+    CleanerError.SCAN_FAILED -> R.string.scan_failed
+    CleanerError.SCAN_SPACE_QUERY_FAILED -> R.string.scan_space_query_failed
+    CleanerError.SCAN_SPACE_PERMISSION_DENIED -> R.string.scan_space_permission_denied
+    CleanerError.SCAN_SPACE_RESPONSE_INVALID -> R.string.scan_space_response_invalid
+    CleanerError.SCAN_CURRENT_SPACE_MISSING -> R.string.scan_current_space_missing
+    CleanerError.ACTION_FAILED -> R.string.action_failed
+    CleanerError.BACKEND_SELECTION_FAILED -> R.string.backend_selection_failed
 }
 
 private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"

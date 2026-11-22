@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +21,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -39,8 +46,9 @@ import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerState
 import com.eynnzerr.telemetrycleaner.ui.components.CleanerModalSheet
 import com.eynnzerr.telemetrycleaner.ui.components.SegmentedListDefaults
 import com.eynnzerr.telemetrycleaner.ui.components.label
+import kotlinx.coroutines.launch
 
-/** Displays the cleaner's immutable state with Material 3 Expressive cards, segmented lists, and a floating toolbar. */
+/** Displays the cleaner's immutable state with Material 3 Expressive cards, segmented lists, and floating bars. */
 @Composable
 fun CleanerScreen(
     state: CleanerState,
@@ -52,7 +60,27 @@ fun CleanerScreen(
     modifier: Modifier = Modifier,
 ) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val hasSelectionActions = PackageAction.entries.any { state.targetsFor(it).isNotEmpty() }
+
+    val isSummaryVisible by remember(listState) {
+        derivedStateOf {
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) {
+                listState.firstVisibleItemIndex == 0
+            } else {
+                visibleItems.any { it.key == "summary" }
+            }
+        }
+    }
+    val statusKey = state.summaryStatusKey()
+    var floatingStatus by remember {
+        mutableStateOf(FloatingStatusVisibilityState(visible = false, lastSeenStatus = statusKey))
+    }
+    LaunchedEffect(statusKey, isSummaryVisible) {
+        floatingStatus = floatingStatus.reduce(statusKey, isSummaryVisible)
+    }
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -73,6 +101,7 @@ fun CleanerScreen(
             contentAlignment = Alignment.TopCenter,
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .widthIn(max = 620.dp)
                     .fillMaxWidth(),
@@ -199,6 +228,13 @@ fun CleanerScreen(
                     }
                 }
             }
+
+            AnimatedFloatingStatusPill(
+                visible = floatingStatus.visible,
+                state = state,
+                onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
 
             AnimatedSelectionBar(
                 state = state,
