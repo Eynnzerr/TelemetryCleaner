@@ -92,10 +92,10 @@ internal class AutoCleanupStartCoordinator(
             val shouldMonitor = if (saved) {
                 false
             } else {
-                val stillEnabled = settings.readPreferences().autoCleanupEnabled
+                val persisted = settings.readPersistedAutoCleanupEnabled()
                 if (latestGeneration != generation) return@launch
-                if (stillEnabled) settings.reportAutoCleanupSaveFailure()
-                stillEnabled
+                if (persisted != false) settings.reportAutoCleanupSaveFailure()
+                persisted == true
             }
             reconcile(shouldMonitor, generation)
         }
@@ -123,13 +123,13 @@ internal class AutoCleanupStartCoordinator(
                 if (saved) {
                     true
                 } else {
-                    val alreadyEnabled = settings.readPreferences().autoCleanupEnabled
+                    val persisted = settings.readPersistedAutoCleanupEnabled()
                     if (latestGeneration != generation) return@launch
-                    if (!alreadyEnabled) settings.reportAutoCleanupSaveFailure()
-                    alreadyEnabled
+                    if (persisted != true) settings.reportAutoCleanupSaveFailure()
+                    persisted == true
                 }
             } else {
-                settings.readPreferences().autoCleanupEnabled
+                settings.readPersistedAutoCleanupEnabled() == true
             }
             reconcile(shouldMonitor, generation)
         }

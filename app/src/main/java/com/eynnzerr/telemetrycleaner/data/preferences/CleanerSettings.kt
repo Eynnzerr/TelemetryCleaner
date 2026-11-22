@@ -124,6 +124,16 @@ internal class CleanerSettings(
     /** Reads the saved settings after any in-flight settings write. */
     suspend fun readPreferences(): CleanerPreferences = settingsAccess.withLock { preferences.first() }
 
+    /** Reads the persisted auto-cleanup opt-in, or null if storage itself cannot be read. */
+    suspend fun readPersistedAutoCleanupEnabled(): Boolean? = settingsAccess.withLock {
+        try {
+            store.data.first()[AUTO_CLEANUP_ENABLED] ?: false
+        } catch (failure: IOException) {
+            logWarning("Unable to read cleaner settings", failure)
+            null
+        }
+    }
+
     /** Saves the user's choice and reports whether the write succeeded. */
     suspend fun setAutoCleanupEnabled(enabled: Boolean): Boolean =
         save { it[AUTO_CLEANUP_ENABLED] = enabled }.also { saved ->

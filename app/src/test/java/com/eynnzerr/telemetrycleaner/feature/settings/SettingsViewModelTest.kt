@@ -16,6 +16,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -35,11 +36,15 @@ class SettingsViewModelTest {
 
     private class ControllablePreferencesDataStore(
         initial: Preferences = emptyPreferences(),
+        var failReads: Boolean = false,
         private val onUpdate: suspend (attempt: Int) -> Boolean = { true },
     ) : DataStore<Preferences> {
         private val state = MutableStateFlow(initial)
         private var updateAttempts = 0
-        override val data: Flow<Preferences> = state
+        override val data: Flow<Preferences> = flow {
+            if (failReads) throw IOException("Simulated disk read failure")
+            state.collect { emit(it) }
+        }
 
         override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
             val attempt = ++updateAttempts
@@ -387,4 +392,48 @@ class SettingsViewModelTest {
             serviceScope.cancel()
         }
     }
+
+    @Test
+    fun stopWriteAndSubsequentReadBothFail_stopsMonitorWithLatestStartIdAndReportsSaveFailed() =
+        runTest(testDispatcher) {
+            var failWrites = false
+            val store = ControllablePreferencesDataStore { !failWrites }
+            val settings = CleanerSettings(store, logWarning = { _, _ -> })
+            val viewModel = SettingsViewModel(settings)
+            val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
+
+            val stoppedStartIds = mutableListOf<Int>()
+            val coordinator = AutoCleanupStartCoordinator(
+                scope = serviceScope,
+                settings = settings,
+                onStartMonitoring = { awaitCancellation() },
+                onStopService = { stoppedStartIds += it },
+            )
+
+            try {
+                // 1. Enable succeeds and monitoring is active.
+                coordinator.onStartRequest(enabling = true, startId = 1)
+                advanceUntilIdle()
+                assertTrue(settings.readPreferences().autoCleanupEnabled)
+                assertTrue(coordinator.isMonitoring)
+
+                // 2. Storage becomes unreadable and unwritable; user taps notification stop (startId = 2).
+                failWrites = true
+                store.failReads = true
+                coordinator.onStopRequest(startId = 2)
+                advanceUntilIdle()
+
+                assertFalse(coordinator.isMonitoring)
+                assertEquals(AutoCleanupStatus.OFF, settings.autoCleanupStatus.value)
+                assertEquals(listOf(2), stoppedStartIds)
+
+                val collectedEvents = mutableListOf<SettingsEvent>()
+                val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
+                advanceUntilIdle()
+                assertEquals(listOf(SettingsEvent.SaveFailed), collectedEvents)
+                collectJob.cancel()
+            } finally {
+                serviceScope.cancel()
+            }
+        }
 }
