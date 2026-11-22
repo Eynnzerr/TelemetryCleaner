@@ -59,43 +59,60 @@ internal class AutoCleanupStartCoordinator(
     private var monitorJob: Job? = null
     private var requestJob: Job? = null
     private var latestGeneration: Long = 0L
-    private var latestRequestIsEnable: Boolean = false
+    private var latestStartId: Int = 0
 
     val isMonitoring: Boolean
         get() = monitorJob?.isActive == true
 
-    val hasActiveEnableRequest: Boolean
-        get() = requestJob?.isActive == true && latestRequestIsEnable
+    /** Reconciles monitoring and service lifecycle with the resolved preference for the latest generation. */
+    private fun reconcile(shouldMonitor: Boolean, generation: Long) {
+        if (latestGeneration != generation) return
+        if (shouldMonitor) {
+            if (monitorJob?.isActive != true) {
+                monitorJob = scope.launch { onStartMonitoring() }
+            }
+        } else {
+            monitorJob?.cancel()
+            monitorJob = null
+            settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
+            onStopService(latestStartId)
+        }
+    }
 
     /** Handles an explicit ACTION_STOP command, superseding any pending start or enable request. */
     fun onStopRequest(startId: Int) {
+        latestStartId = startId
         val generation = ++latestGeneration
-        latestRequestIsEnable = false
         val previous = requestJob
         requestJob = scope.launch {
             previous?.join()
             if (latestGeneration != generation) return@launch
-            if (settings.setAutoCleanupEnabled(false) && latestGeneration == generation) {
-                monitorJob?.cancel()
-                monitorJob = null
-                settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
-                onStopService(startId)
+            val saved = settings.setAutoCleanupEnabled(false)
+            if (latestGeneration != generation) return@launch
+            val shouldMonitor = if (saved) {
+                false
+            } else {
+                val stillEnabled = settings.readPreferences().autoCleanupEnabled
+                if (latestGeneration != generation) return@launch
+                if (stillEnabled) settings.reportAutoCleanupSaveFailure()
+                stillEnabled
             }
+            reconcile(shouldMonitor, generation)
         }
     }
 
     /**
      * Handles a normal start or explicit ACTION_ENABLE command.
-     * Superseded requests exit without stopping the service or surfacing stale save failures.
+     * Coalesced refreshes still advance [latestStartId] so subsequent stops match Android's latest delivered startId.
      */
     fun onStartRequest(enabling: Boolean, startId: Int) {
+        latestStartId = startId
         if (!enabling) {
-            if (monitorJob?.isActive == true || hasActiveEnableRequest) {
+            if (monitorJob?.isActive == true || requestJob?.isActive == true) {
                 return
             }
         }
         val generation = ++latestGeneration
-        latestRequestIsEnable = enabling
         val previous = requestJob
         requestJob = scope.launch {
             previous?.join()
@@ -108,24 +125,21 @@ internal class AutoCleanupStartCoordinator(
                 } else {
                     val alreadyEnabled = settings.readPreferences().autoCleanupEnabled
                     if (latestGeneration != generation) return@launch
-                    if (!alreadyEnabled) settings.reportAutoCleanupEnableSaveFailure()
+                    if (!alreadyEnabled) settings.reportAutoCleanupSaveFailure()
                     alreadyEnabled
                 }
             } else {
                 settings.readPreferences().autoCleanupEnabled
             }
-            if (latestGeneration != generation) return@launch
-            if (shouldMonitor) {
-                if (monitorJob?.isActive != true) {
-                    monitorJob = scope.launch { onStartMonitoring() }
-                }
-            } else {
-                monitorJob?.cancel()
-                monitorJob = null
-                settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
-                onStopService(startId)
-            }
+            reconcile(shouldMonitor, generation)
         }
+    }
+
+    /** Stops the service with the latest delivered startId when the monitor observes persisted opt-out. */
+    fun onMonitorObservedDisabled() {
+        if (requestJob?.isActive == true) return
+        settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
+        onStopService(latestStartId)
     }
 }
 
@@ -216,10 +230,7 @@ class AutoCleanupService : Service() {
             preferences to connection
         }.collectLatest { (preferences, connection) ->
             if (!preferences.autoCleanupEnabled) {
-                if (!coordinator.hasActiveEnableRequest) {
-                    settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
-                    stopSelf()
-                }
+                coordinator.onMonitorObservedDisabled()
                 return@collectLatest
             }
             while (currentCoroutineContext().isActive) {

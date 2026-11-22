@@ -114,12 +114,12 @@ internal class CleanerSettings(
     /** Reports runtime status independently from the persisted switch. */
     val autoCleanupStatus: StateFlow<AutoCleanupStatus> = mutableAutoCleanupStatus.asStateFlow()
 
-    /** Holds an unacknowledged foreground auto-cleanup enable save failure until shown or superseded by success. */
-    private val mutablePendingAutoCleanupEnableSaveFailure = MutableStateFlow(false)
+    /** Holds an unacknowledged service auto-cleanup save failure until shown or superseded by success. */
+    private val mutablePendingAutoCleanupSaveFailure = MutableStateFlow(false)
 
-    /** True when persisting an explicit foreground enable request failed and has not yet been shown or superseded. */
-    val pendingAutoCleanupEnableSaveFailure: StateFlow<Boolean> =
-        mutablePendingAutoCleanupEnableSaveFailure.asStateFlow()
+    /** True when persisting an explicit service enable or stop request failed and has not yet been shown or superseded. */
+    val pendingAutoCleanupSaveFailure: StateFlow<Boolean> =
+        mutablePendingAutoCleanupSaveFailure.asStateFlow()
 
     /** Reads the saved settings after any in-flight settings write. */
     suspend fun readPreferences(): CleanerPreferences = settingsAccess.withLock { preferences.first() }
@@ -127,7 +127,7 @@ internal class CleanerSettings(
     /** Saves the user's choice and reports whether the write succeeded. */
     suspend fun setAutoCleanupEnabled(enabled: Boolean): Boolean =
         save { it[AUTO_CLEANUP_ENABLED] = enabled }.also { saved ->
-            if (saved && enabled) clearAutoCleanupEnableSaveFailure()
+            if (saved) clearAutoCleanupSaveFailure()
         }
 
     /** Saves the preference for disabling a package after a failed manual uninstall. */
@@ -171,18 +171,18 @@ internal class CleanerSettings(
         mutableAutoCleanupStatus.value = status
     }
 
-    /** Records that persisting an explicit auto-cleanup enable request failed. */
-    fun reportAutoCleanupEnableSaveFailure() {
-        mutablePendingAutoCleanupEnableSaveFailure.value = true
+    /** Records that persisting an explicit service enable or stop request failed. */
+    fun reportAutoCleanupSaveFailure() {
+        mutablePendingAutoCleanupSaveFailure.value = true
     }
 
-    /** Atomically consumes a pending auto-cleanup enable save failure once delivered to the foreground UI. */
-    fun consumeAutoCleanupEnableSaveFailure(): Boolean =
-        mutablePendingAutoCleanupEnableSaveFailure.compareAndSet(expect = true, update = false)
+    /** Atomically consumes a pending service save failure once delivered to the foreground UI. */
+    fun consumeAutoCleanupSaveFailure(): Boolean =
+        mutablePendingAutoCleanupSaveFailure.compareAndSet(expect = true, update = false)
 
-    /** Clears any unshown enable save failure after a newer enable request succeeds. */
-    fun clearAutoCleanupEnableSaveFailure() {
-        mutablePendingAutoCleanupEnableSaveFailure.value = false
+    /** Clears any unshown service save failure after a newer persistence change succeeds. */
+    fun clearAutoCleanupSaveFailure() {
+        mutablePendingAutoCleanupSaveFailure.value = false
     }
 
     /** Writes one settings change before allowing the next cleanup submission to read it. */

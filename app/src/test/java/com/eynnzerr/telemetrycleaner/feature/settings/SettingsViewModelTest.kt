@@ -148,7 +148,7 @@ class SettingsViewModelTest {
                 advanceUntilIdle()
                 assertEquals(listOf(1), stoppedStartIds)
                 assertEquals(AutoCleanupStatus.OFF, settings.autoCleanupStatus.value)
-                assertTrue(settings.pendingAutoCleanupEnableSaveFailure.value)
+                assertTrue(settings.pendingAutoCleanupSaveFailure.value)
 
                 // While still backgrounded, B succeeds.
                 shouldFail = false
@@ -157,7 +157,7 @@ class SettingsViewModelTest {
                 assertTrue(settings.readPreferences().autoCleanupEnabled)
                 assertEquals(1, monitorStarts)
                 assertTrue(coordinator.isMonitoring)
-                assertFalse(settings.pendingAutoCleanupEnableSaveFailure.value)
+                assertFalse(settings.pendingAutoCleanupSaveFailure.value)
 
                 // Activity returns to foreground: must not see A's superseded SaveFailed toast.
                 val collectedEvents = mutableListOf<SettingsEvent>()
@@ -270,6 +270,120 @@ class SettingsViewModelTest {
             assertEquals(listOf(SettingsEvent.SaveFailed, SettingsEvent.SaveFailed), collectedEvents)
         } finally {
             collectJob.cancel()
+            serviceScope.cancel()
+        }
+    }
+
+    @Test
+    fun enableSucceedsThenQueuedStopFails_recoversSingleMonitorAndReportsSaveFailed() = runTest(testDispatcher) {
+        val enableWriteStarted = CompletableDeferred<Unit>()
+        val releaseEnableWrite = CompletableDeferred<Unit>()
+        val store = ControllablePreferencesDataStore { attempt ->
+            if (attempt == 1) {
+                enableWriteStarted.complete(Unit)
+                releaseEnableWrite.await()
+                true
+            } else {
+                false
+            }
+        }
+        val settings = CleanerSettings(store, logWarning = { _, _ -> })
+        val viewModel = SettingsViewModel(settings)
+        val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
+
+        var monitorStarts = 0
+        val stoppedStartIds = mutableListOf<Int>()
+        val coordinator = AutoCleanupStartCoordinator(
+            scope = serviceScope,
+            settings = settings,
+            onStartMonitoring = {
+                monitorStarts += 1
+                awaitCancellation()
+            },
+            onStopService = { stoppedStartIds += it },
+        )
+
+        try {
+            // 1. Enable A starts writing and suspends.
+            coordinator.onStartRequest(enabling = true, startId = 1)
+            advanceUntilIdle()
+            assertTrue(enableWriteStarted.isCompleted)
+            assertFalse(coordinator.isMonitoring)
+
+            // 2. Notification stop B arrives before A finishes writing.
+            coordinator.onStopRequest(startId = 2)
+            advanceUntilIdle()
+
+            // 3. A persists true, then B fails to persist false -> monitor must be reconciled and SaveFailed reported.
+            releaseEnableWrite.complete(Unit)
+            advanceUntilIdle()
+
+            assertTrue(settings.readPreferences().autoCleanupEnabled)
+            assertEquals(1, monitorStarts)
+            assertTrue(coordinator.isMonitoring)
+            assertTrue(stoppedStartIds.isEmpty())
+
+            val collectedEvents = mutableListOf<SettingsEvent>()
+            val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
+            advanceUntilIdle()
+            assertEquals(listOf(SettingsEvent.SaveFailed), collectedEvents)
+            collectJob.cancel()
+        } finally {
+            serviceScope.cancel()
+        }
+    }
+
+    @Test
+    fun stopWhileMonitoringWithCoalescedRefresh_cancelsMonitorAndStopsWithLatestStartId() = runTest(testDispatcher) {
+        val stopWriteStarted = CompletableDeferred<Unit>()
+        val releaseStopWrite = CompletableDeferred<Unit>()
+        val store = ControllablePreferencesDataStore { attempt ->
+            if (attempt == 2) {
+                stopWriteStarted.complete(Unit)
+                releaseStopWrite.await()
+            }
+            true
+        }
+        val settings = CleanerSettings(store, logWarning = { _, _ -> })
+        val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
+
+        var monitorStarts = 0
+        val stoppedStartIds = mutableListOf<Int>()
+        val coordinator = AutoCleanupStartCoordinator(
+            scope = serviceScope,
+            settings = settings,
+            onStartMonitoring = {
+                monitorStarts += 1
+                awaitCancellation()
+            },
+            onStopService = { stoppedStartIds += it },
+        )
+
+        try {
+            // 1. Enable succeeds and monitor is running (startId = 1).
+            coordinator.onStartRequest(enabling = true, startId = 1)
+            advanceUntilIdle()
+            assertEquals(1, monitorStarts)
+            assertTrue(coordinator.isMonitoring)
+
+            // 2. Notification stop arrives (startId = 2) and suspends while persisting false.
+            coordinator.onStopRequest(startId = 2)
+            advanceUntilIdle()
+            assertTrue(stopWriteStarted.isCompleted)
+
+            // 3. Coalesced refresh arrives (startId = 3) while stop write is in flight.
+            coordinator.onStartRequest(enabling = false, startId = 3)
+            advanceUntilIdle()
+
+            // 4. Stop write completes -> monitor is cancelled, preference is false, and stopSelf uses startId = 3.
+            releaseStopWrite.complete(Unit)
+            advanceUntilIdle()
+
+            assertFalse(settings.readPreferences().autoCleanupEnabled)
+            assertFalse(coordinator.isMonitoring)
+            assertEquals(AutoCleanupStatus.OFF, settings.autoCleanupStatus.value)
+            assertEquals(listOf(3), stoppedStartIds)
+        } finally {
             serviceScope.cancel()
         }
     }

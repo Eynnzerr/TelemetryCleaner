@@ -62,13 +62,13 @@ internal class SettingsViewModel(
     /**
      * Emits one-shot settings events to the active foreground collector.
      *
-     * Background auto-cleanup enable save failures stay in [CleanerSettings.pendingAutoCleanupEnableSaveFailure]
-     * until collected in foreground, so a later successful enable clears any unshown failure before resume.
+     * Background auto-cleanup save failures stay in [CleanerSettings.pendingAutoCleanupSaveFailure]
+     * until collected in foreground, so a later successful persistence write clears any unshown failure before resume.
      */
     val events: Flow<SettingsEvent> = merge(
         eventChannel.receiveAsFlow(),
-        settings.pendingAutoCleanupEnableSaveFailure.mapNotNull { pending ->
-            if (pending && settings.consumeAutoCleanupEnableSaveFailure()) {
+        settings.pendingAutoCleanupSaveFailure.mapNotNull { pending ->
+            if (pending && settings.consumeAutoCleanupSaveFailure()) {
                 SettingsEvent.SaveFailed
             } else {
                 null
