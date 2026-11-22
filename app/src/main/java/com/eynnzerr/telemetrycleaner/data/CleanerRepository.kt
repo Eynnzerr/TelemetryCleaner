@@ -12,8 +12,9 @@ import com.eynnzerr.telemetrycleaner.BuildConfig
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageCommands
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageFallback
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageFallbackResult
-import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageReading
+import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageLookupResult
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PrivilegeSessionManager
+import com.eynnzerr.telemetrycleaner.data.packagemanager.toLookupResult
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupHistoryStore
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupRemoval
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
@@ -111,18 +112,18 @@ class CleanerRepository internal constructor(
         scanPackages(commands, PackageDirectory.variants.values + customEntries, manager)
     }
 
-    /** Verifies whether an exact package name exists on the device via the privileged service. */
+    /** Verifies whether an exact package name exists in an actionable state on the device. */
     internal suspend fun lookupPackage(packageName: String): PackageEntry? = sessionManager.withPackageCommands { commands, _ ->
         require(isExactPackageName(packageName))
-        when (val reading = commands.read(packageName)) {
-            is PackageReading.Found -> PackageDirectory.variants[packageName] ?: customEntry(packageName)
-            PackageReading.Missing -> null
-            is PackageReading.Unavailable -> error("Could not read $packageName: ${reading.issue}")
+        when (commands.read(packageName).toLookupResult()) {
+            is PackageLookupResult.Found -> PackageDirectory.variants[packageName] ?: customEntry(packageName)
+            PackageLookupResult.Missing -> null
+            PackageLookupResult.Unavailable -> error("Could not verify $packageName")
         }
     }
 
-    /** Changes directory membership without changing package installation or automatic cleanup. */
-    suspend fun setCustomPackage(packageName: String, included: Boolean): Boolean {
+    /** Changes directory membership atomically so cancelling a dialog cannot drop the refresh event after commit. */
+    suspend fun setCustomPackage(packageName: String, included: Boolean): Boolean = withContext(NonCancellable) {
         val saved = customPackagesMutex.withLock {
             val blocked = included && (packageName in PackageDirectory.variants || packageName in CriticalSystemPackages.names)
             !blocked && packageName !in PackageDirectory.variants && settings.setCustomPackage(packageName, included)
@@ -135,7 +136,7 @@ class CleanerRepository internal constructor(
             }
             customPackageChangesFlow.emit(change)
         }
-        return saved
+        saved
     }
 
     /** Resolves an optional application label for a package already identified by the privileged service. */
@@ -175,16 +176,32 @@ class CleanerRepository internal constructor(
                     if (action != PackageAction.RESTORE && target.packageName in CriticalSystemPackages.names) {
                         return@map ChangeOutcome(target, false, ChangeFailure.ProtectedSystemPackage)
                     }
+                    var spaceIdentityMismatch = false
                     val outcome = changePackage(
-                        commands,
-                        backend,
-                        target,
-                        action,
+                        commands = commands,
+                        backend = backend,
+                        target = target,
+                        action = action,
                         requireVerifiedSystemIdentity = false,
                         disableOnUninstallFailure = disableOnUninstallFailure,
+                        canSubmit = {
+                            val expectedSerial = target.userSerialNumber
+                            val matches = expectedSerial == null || userSerialNumber(target.userId) == expectedSerial
+                            if (!matches) spaceIdentityMismatch = true
+                            matches
+                        },
                     )
-                    val denialLog = outcome.denialLog
-                    if (denialLog == null) outcome else outcome.copy(denialLog = denialContext(target, backend) + denialLog)
+                    val resolvedOutcome = if (spaceIdentityMismatch && !outcome.success && outcome.failure == null) {
+                        outcome.copy(failure = ChangeFailure.SpaceStateUnverified)
+                    } else {
+                        outcome
+                    }
+                    val denialLog = resolvedOutcome.denialLog
+                    if (denialLog == null) {
+                        resolvedOutcome
+                    } else {
+                        resolvedOutcome.copy(denialLog = denialContext(target, backend) + denialLog)
+                    }
                 }
             }
         }
@@ -294,9 +311,13 @@ class CleanerRepository internal constructor(
         ChangeOutcome(target, false, ChangeFailure.StateUnverified)
     }
 
-    /** Runs the existing shell UID uninstall fallback through Shizuku. */
-    private fun uninstallThroughShizuku(packageName: String, userId: Int): PackageFallbackResult =
-        fallbackApkPath?.let { PackageFallback.uninstall(it, packageName, userId) }
+    /** Runs the existing shell UID uninstall fallback through Shizuku with the expected version constraint. */
+    private fun uninstallThroughShizuku(
+        packageName: String,
+        userId: Int,
+        expectedVersionCode: Long?,
+    ): PackageFallbackResult =
+        fallbackApkPath?.let { PackageFallback.uninstall(it, packageName, userId, expectedVersionCode) }
             ?: PackageFallbackResult(false, "Helper APK unavailable")
 
     /** Adds the device, caller and effective restriction needed to interpret a denial. */

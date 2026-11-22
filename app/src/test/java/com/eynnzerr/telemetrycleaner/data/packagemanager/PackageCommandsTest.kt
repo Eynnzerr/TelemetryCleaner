@@ -7,6 +7,8 @@ import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageEntry
 import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -271,6 +273,7 @@ class PackageCommandsTest {
             },
         )
 
+        var capturedVersionCode: Long? = null
         val commands = PackageCommands(executor, clock = { now.also { now += 100L } })
         val outcome = commands.change(
             target = target,
@@ -278,7 +281,8 @@ class PackageCommandsTest {
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
             disableOnUninstallFailure = false,
-            deleteThroughAppProcess = { _, _ ->
+            deleteThroughAppProcess = { _, _, versionCode ->
+                capturedVersionCode = versionCode
                 removed = true
                 PackageFallbackResult(submitted = true, detail = "Success")
             },
@@ -286,5 +290,225 @@ class PackageCommandsTest {
 
         assertTrue(outcome.success)
         assertNull(outcome.failure)
+        assertEquals(123L, capturedVersionCode)
+    }
+
+    @Test
+    fun change_autoCleanupSkipsDisabledPackageWithoutSubmittingOrDeleting() = runTest {
+        val pkg = "com.oppo.ctautoregist"
+        val target = ChangeTarget(pkg, 0)
+        var canSubmitCalled = false
+
+        val executor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        userLines = listOf(
+                            "User 0: installed=true enabled=${PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER}",
+                        ),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = true,
+            captureDenialLog = false,
+            disableOnUninstallFailure = false,
+            canSubmit = {
+                canSubmitCalled = true
+                true
+            },
+        )
+
+        assertTrue(outcome.success)
+        assertNull(outcome.failure)
+        assertFalse(canSubmitCalled)
+        assertTrue(executor.executedCommands.isEmpty())
+    }
+
+    @Test
+    fun change_skipsFallbackDeleteWhenPackageBecomesDisabledAfterFirstFailure() = runTest {
+        val pkg = "com.oppo.ctautoregist"
+        val target = ChangeTarget(pkg, 0)
+        var dumpCount = 0
+        var fallbackCalled = false
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_USER_RESTRICTED]") },
+            onDump = {
+                dumpCount += 1
+                val enabled = if (dumpCount == 1) {
+                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+                } else {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                }
+                PackageShellResult(0, packageDump(pkg, userLines = listOf("User 0: installed=true enabled=$enabled")))
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            disableOnUninstallFailure = false,
+            deleteThroughAppProcess = { _, _, _ ->
+                fallbackCalled = true
+                PackageFallbackResult(true, "Should not run")
+            },
+        )
+
+        assertFalse(outcome.success)
+        assertFalse(fallbackCalled)
+    }
+
+    @Test
+    fun change_abortsFallbackDeleteAndDisableWhenVersionChangesMidOperation() = runTest {
+        val pkg = "com.example.custom"
+        val target = ChangeTarget(pkg, 0)
+        var dumpCount = 0
+        var fallbackCalled = false
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_INTERNAL_ERROR]") },
+            onDump = {
+                dumpCount += 1
+                val ver = if (dumpCount == 1) 100L else 101L
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        versionCode = ver,
+                        flags = "HAS_CODE",
+                        userLines = listOf("User 0: installed=true enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            disableOnUninstallFailure = true,
+            deleteThroughAppProcess = { _, _, _ ->
+                fallbackCalled = true
+                PackageFallbackResult(true, "Should not run")
+            },
+        )
+
+        assertFalse(outcome.success)
+        assertFalse(outcome.disabledInstead)
+        assertFalse(fallbackCalled)
+        // Only the initial uninstall command should have run; no disable-user fallback on the updated version.
+        assertEquals(1, executor.executedCommands.size)
+        assertEquals("uninstall", executor.executedCommands.single().first())
+    }
+
+    @Test
+    fun change_abortsWithZeroWritesWhenCanSubmitRejectsStaleSpaceIdentity() = runTest {
+        val pkg = "com.oppo.ctautoregist"
+        val target = ChangeTarget(pkg, userId = 10, userSerialNumber = 42L)
+
+        val executor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(0, packageDump(pkg, userLines = listOf("User 10: installed=true enabled=0")))
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            disableOnUninstallFailure = true,
+            canSubmit = { false },
+        )
+
+        assertFalse(outcome.success)
+        assertTrue(executor.executedCommands.isEmpty())
+    }
+
+    @Test
+    fun change_cancellingDuringPreReadPreventsFirstMutationCommand() = runTest {
+        val pkg = "com.oppo.ctautoregist"
+        val target = ChangeTarget(pkg, 0)
+        var jobToCancel: kotlinx.coroutines.Job? = null
+
+        val executor = FakePackageExecutor(
+            onDump = {
+                jobToCancel?.cancel(CancellationException("Activity left"))
+                PackageShellResult(0, packageDump(pkg, userLines = listOf("User 0: installed=true enabled=0")))
+            },
+        )
+
+        var caughtCancellation = false
+        jobToCancel = launch {
+            try {
+                PackageCommands(executor).change(
+                    target = target,
+                    action = PackageAction.UNINSTALL,
+                    requireVerifiedSystemIdentity = false,
+                    captureDenialLog = false,
+                    disableOnUninstallFailure = false,
+                )
+            } catch (_: CancellationException) {
+                caughtCancellation = true
+            }
+        }
+        jobToCancel.join()
+
+        assertTrue(caughtCancellation)
+        assertTrue(executor.executedCommands.isEmpty())
+    }
+
+    @Test
+    fun toLookupResult_rejectsStaleNotFoundRemnantsAndUnknownRecords() {
+        val pkg = "com.example.remnant"
+        val remnantExecutor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    """
+                    Packages:
+                      Package [$pkg] (abc):
+                        pkg=null
+                        User 0: installed=false enabled=0
+                    """.trimIndent(),
+                )
+            },
+        )
+        assertEquals(PackageLookupResult.Missing, PackageCommands(remnantExecutor).read(pkg).toLookupResult())
+
+        val unknownExecutor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    """
+                    Packages:
+                      Package [$pkg] (abc):
+                        pkg=null
+                        User 0: enabled=0
+                    """.trimIndent(),
+                )
+            },
+        )
+        assertEquals(PackageLookupResult.Unavailable, PackageCommands(unknownExecutor).read(pkg).toLookupResult())
+
+        val restorableExecutor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(pkg, userLines = listOf("User 0: installed=false enabled=0")),
+                )
+            },
+        )
+        assertTrue(PackageCommands(restorableExecutor).read(pkg).toLookupResult() is PackageLookupResult.Found)
     }
 }

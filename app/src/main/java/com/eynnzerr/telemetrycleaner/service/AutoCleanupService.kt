@@ -78,6 +78,9 @@ class AutoCleanupService : Service() {
             return START_NOT_STICKY
         }
         if (monitorJob?.isActive == true) {
+            if (intent?.action == ACTION_ENABLE) {
+                serviceScope.launch { settings.setAutoCleanupEnabled(true) }
+            }
             updateNotification(settings.autoCleanupStatus.value)
             return START_STICKY
         }
@@ -99,8 +102,14 @@ class AutoCleanupService : Service() {
             return stopAfterStartFailure()
         }
 
+        val enabling = intent?.action == ACTION_ENABLE
         monitorJob = serviceScope.launch {
-            if (settings.readPreferences().autoCleanupEnabled) {
+            val enabled = if (enabling) {
+                settings.setAutoCleanupEnabled(true)
+            } else {
+                settings.readPreferences().autoCleanupEnabled
+            }
+            if (enabled) {
                 monitor()
             } else {
                 settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
@@ -258,6 +267,9 @@ class AutoCleanupService : Service() {
     }
 
     companion object {
+        /** Identifies a foreground opt-in start that must persist enabled state inside the service. */
+        private const val ACTION_ENABLE = "com.eynnzerr.telemetrycleaner.ENABLE_AUTO_CLEANUP"
+
         /** Identifies the notification's explicit opt-out action. */
         private const val ACTION_STOP = "com.eynnzerr.telemetrycleaner.STOP_AUTO_CLEANUP"
 
@@ -266,6 +278,30 @@ class AutoCleanupService : Service() {
 
         /** Replaces the same notification throughout the service's lifetime. */
         private const val NOTIFICATION_ID = 1
+
+        /**
+         * Immediately starts the foreground service from a foreground user confirmation so leaving
+         * the Activity while preferences persist cannot drop the service startup.
+         */
+        @MainThread
+        internal fun enableAndStart(
+            context: Context,
+            settings: CleanerSettings,
+        ): Boolean {
+            settings.setAutoCleanupStatus(AutoCleanupStatus.STARTING)
+            return try {
+                context.startForegroundService(
+                    Intent(context, AutoCleanupService::class.java).setAction(ACTION_ENABLE),
+                )
+                true
+            } catch (_: IllegalStateException) {
+                settings.setAutoCleanupStatus(AutoCleanupStatus.START_FAILED)
+                false
+            } catch (_: SecurityException) {
+                settings.setAutoCleanupStatus(AutoCleanupStatus.START_FAILED)
+                false
+            }
+        }
 
         /** Starts the monitor when opted in, or refreshes its notification after permission is granted. */
         @MainThread

@@ -30,11 +30,12 @@ public final class PackageUninstaller {
             }
             if (args.length < 2) {
                 System.out.println("USAGE: " + PackageUninstaller.class.getName()
-                        + " <package> <userId>");
+                        + " <package> <userId> [versionCode]");
                 return;
             }
             String packageName = args[0];
             int userId = Integer.parseInt(args[1]);
+            int versionCode = args.length >= 3 ? Integer.parseInt(args[2]) : -1;
 
             Object packageManager = Class.forName("android.app.ActivityThread")
                     .getMethod("getPackageManager")
@@ -52,9 +53,9 @@ public final class PackageUninstaller {
                     int.class,
                     int.class);
             try {
-                deletePackageAsUser.invoke(packageManager, packageName, -1, null, userId, flags);
+                deletePackageAsUser.invoke(packageManager, packageName, versionCode, null, userId, flags);
                 System.out.println("DELETE_REQUESTED " + packageName + " user=" + userId
-                        + " flags=" + flags);
+                        + " versionCode=" + versionCode + " flags=" + flags);
             } catch (InvocationTargetException e) {
                 System.out.println("DELETE_FAILED " + e.getCause());
             }

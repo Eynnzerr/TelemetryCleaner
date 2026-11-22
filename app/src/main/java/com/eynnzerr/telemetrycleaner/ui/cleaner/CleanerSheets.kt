@@ -134,12 +134,18 @@ internal fun CleanerSheetContent(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            val targetedUsersByPackage = panel.targets.groupBy(ChangeTarget::packageName) { it.userId }
+                .mapValues { (_, ids) -> ids.toSet() }
             Column(verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap)) {
                 panel.targets.forEachIndexed { index, target ->
+                    val detected = snapshot?.packages?.firstOrNull { it.entry.packageName == target.packageName }
+                    val losesLastApk = uninstall &&
+                        detected?.losesApkOnUninstall(targetedUsersByPackage[target.packageName].orEmpty()) == true
                     TargetRow(
                         target = target,
                         snapshot = snapshot,
                         shape = segmentedItemShape(index, panel.targets.size),
+                        warningText = if (losesLastApk) stringResource(R.string.confirm_uninstall_last_apk_warning) else null,
                     )
                 }
             }
@@ -267,6 +273,7 @@ private fun TargetRow(
     snapshot: ScanSnapshot?,
     shape: Shape,
     statusBadge: Pair<String, StatusTone>? = null,
+    warningText: String? = null,
 ) {
     val result = snapshot?.packages?.firstOrNull { it.entry.packageName == target.packageName }
     val space = snapshot?.users?.firstOrNull { it.id == target.userId }?.displayName()
@@ -293,6 +300,14 @@ private fun TargetRow(
                     text = target.packageName,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (warningText != null) {
+                Text(
+                    text = warningText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
             if (statusBadge != null) {

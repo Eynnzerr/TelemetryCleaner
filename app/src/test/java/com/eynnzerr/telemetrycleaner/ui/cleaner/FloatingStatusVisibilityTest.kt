@@ -109,4 +109,12 @@ class FloatingStatusVisibilityTest {
             assertFalse(state.shouldShowFloatingStatusPill(isSummaryVisible = true))
         }
     }
+
+    @Test
+    fun showsForPartialScanFailureEvenWhenInstalledCountIsPositive() {
+        val partialFailure = cleanerState(PackageState.INSTALLED, PackageState.UNKNOWN)
+
+        assertTrue(partialFailure.shouldShowFloatingStatusPill(isSummaryVisible = false))
+        assertFalse(partialFailure.shouldShowFloatingStatusPill(isSummaryVisible = true))
+    }
 }

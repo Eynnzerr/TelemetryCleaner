@@ -25,12 +25,19 @@ internal object PackageFallback {
     /**
      * Asks the hidden package manager interface to delete [packageName] for [userId].
      *
-     * The caller still verifies whether the requested state change took effect.
+     * When [expectedVersionCode] fits in a signed 32-bit int, it is forwarded to `deletePackageAsUser`
+     * so concurrent app updates cannot be silently deleted. The caller still verifies the resulting state.
      */
-    fun uninstall(apkPath: String, packageName: String, userId: Int): PackageFallbackResult {
+    fun uninstall(
+        apkPath: String,
+        packageName: String,
+        userId: Int,
+        expectedVersionCode: Long? = null,
+    ): PackageFallbackResult {
+        val versionArg = expectedVersionCode?.takeIf { it in 0L..Int.MAX_VALUE.toLong() }?.toInt() ?: -1
         val process = try {
             if (!Shizuku.pingBinder()) return PackageFallbackResult(false, "Shizuku disconnected")
-            startShizukuProcess(command(apkPath, packageName, userId))
+            startShizukuProcess(command(apkPath, packageName, userId, versionArg))
         } catch (failure: Throwable) {
             return PackageFallbackResult(false, "Could not start helper: ${failure.cause ?: failure}")
         }
@@ -51,9 +58,9 @@ internal object PackageFallback {
     }
 
     /** Starts the helper with this APK as its class path and merges its error stream. */
-    private fun command(apkPath: String, packageName: String, userId: Int): Array<String> {
+    private fun command(apkPath: String, packageName: String, userId: Int, versionCode: Int): Array<String> {
         val script = "CLASSPATH=${apkPath.shellQuoted()} /system/bin/app_process /system/bin " +
-            "$ENTRY_CLASS ${packageName.shellQuoted()} $userId 2>&1"
+            "$ENTRY_CLASS ${packageName.shellQuoted()} $userId $versionCode 2>&1"
         return arrayOf("/system/bin/sh", "-c", script)
     }
 

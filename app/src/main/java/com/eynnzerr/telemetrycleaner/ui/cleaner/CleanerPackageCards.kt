@@ -303,10 +303,7 @@ private fun ComponentRow(
 ) {
     val packageName = result.entry.packageName
     val selectedSpaces = snapshot.users.filter { it.id in state.selectedUserIds }
-    val losesApkOnUninstall = result.hasSystemCopy == false && result.users.none { (userId, status) ->
-        status == PackageState.UNKNOWN || status == PackageState.DISABLED ||
-            (userId !in state.selectedUserIds && status == PackageState.INSTALLED)
-    }
+    val losesApkOnUninstall = result.losesApkOnUninstall(state.selectedUserIds)
     val statusItems = selectedSpaces.map { space ->
         val pkgState = result.users[space.id]
         val status = stringResource(result.installationStatusLabel(space.id))
@@ -329,7 +326,7 @@ private fun ComponentRow(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             Checkbox(
                 checked = packageName in state.selectedPackageNames,
-                enabled = state.canSelectPackage(packageName),
+                enabled = state.canSelectPackage(result),
                 onCheckedChange = { onIntent(CleanerIntent.TogglePackage(packageName)) },
                 modifier = Modifier.semantics { contentDescription = selectionLabel },
             )
@@ -380,7 +377,7 @@ private fun ComponentRow(
             listOf(PackageAction.RESTORE to R.string.restore, PackageAction.UNINSTALL to R.string.uninstall)
                 .forEach { (action, label) ->
                     key(action) {
-                        if (state.targetsFor(action, packageName).isNotEmpty()) {
+                        if (state.targetsFor(action, result).isNotEmpty()) {
                             FilledTonalButton(
                                 onClick = { onIntent(CleanerIntent.RequestAction(action, packageName)) },
                                 shapes = ButtonDefaults.shapes(),

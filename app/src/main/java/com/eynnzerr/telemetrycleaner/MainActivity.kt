@@ -149,7 +149,9 @@ class MainActivity : ComponentActivity() {
                                 autoCleanupEnabled = currentSettings.autoCleanupEnabled,
                                 autoCleanupStatus = currentSettings.autoCleanupStatus,
                                 autoCleanupIntervalMinutes = currentSettings.autoCleanupIntervalMinutes,
-                                onAutoCleanupChange = settingsViewModel::setAutoCleanupEnabled,
+                                onAutoCleanupChange = { enabled ->
+                                    if (enabled) enableAutoCleanup() else settingsViewModel.disableAutoCleanup()
+                                },
                                 onAutoCleanupIntervalChange = settingsViewModel::setAutoCleanupInterval,
                                 disableOnUninstallFailure = currentSettings.disableOnUninstallFailure,
                                 onDisableOnUninstallFailureChange = settingsViewModel::setDisableOnUninstallFailure,
@@ -235,7 +237,6 @@ class MainActivity : ComponentActivity() {
                     settingsViewModel.events.collect { event ->
                         when (event) {
                             SettingsEvent.SaveFailed -> showSaveFailedToast()
-                            SettingsEvent.StartAutoCleanupService -> startAutoCleanupService()
                             SettingsEvent.StopAutoCleanupService -> {
                                 stopService(Intent(this@MainActivity, AutoCleanupService::class.java))
                             }
@@ -250,8 +251,12 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, R.string.settings_save_failed, Toast.LENGTH_SHORT).show()
     }
 
-    private suspend fun startAutoCleanupService() {
-        AutoCleanupService.startIfEnabled(this, settings)
+    /** Starts the foreground service synchronously on foreground opt-in so backgrounding cannot drop it. */
+    private fun enableAutoCleanup() {
+        if (!AutoCleanupService.enableAndStart(this, settings)) {
+            showSaveFailedToast()
+            return
+        }
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED

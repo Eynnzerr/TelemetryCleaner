@@ -72,7 +72,7 @@ import kotlinx.coroutines.launch
  * inside the overview or permissions list never drags, bounces, or dismisses the modal sheet.
  * Dismissing by dragging the handle, header, or tab bar remains enabled.
  */
-private val BlockVerticalSheetNestedScroll = object : NestedScrollConnection {
+internal val BlockVerticalSheetNestedScroll = object : NestedScrollConnection {
     override fun onPostScroll(
         consumed: Offset,
         available: Offset,

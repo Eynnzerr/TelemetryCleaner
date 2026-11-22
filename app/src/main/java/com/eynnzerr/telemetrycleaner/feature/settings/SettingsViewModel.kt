@@ -45,7 +45,6 @@ internal data class SettingsUiState(
 /** Platform side effects requested by [SettingsViewModel] that require an Activity context. */
 internal sealed interface SettingsEvent {
     data object SaveFailed : SettingsEvent
-    data object StartAutoCleanupService : SettingsEvent
     data object StopAutoCleanupService : SettingsEvent
 }
 
@@ -107,19 +106,15 @@ internal class SettingsViewModel(
         }
     }
 
-    /** Persists the auto-cleanup toggle and asks the Activity to start or stop the service. */
-    fun setAutoCleanupEnabled(enabled: Boolean) {
+    /** Persists opting out of automatic cleanup and requests stopping the foreground service. */
+    fun disableAutoCleanup() {
         viewModelScope.launch {
-            if (!settings.setAutoCleanupEnabled(enabled)) {
+            if (!settings.setAutoCleanupEnabled(false)) {
                 eventChannel.send(SettingsEvent.SaveFailed)
                 return@launch
             }
-            if (enabled) {
-                eventChannel.send(SettingsEvent.StartAutoCleanupService)
-            } else {
-                settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
-                eventChannel.send(SettingsEvent.StopAutoCleanupService)
-            }
+            settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
+            eventChannel.send(SettingsEvent.StopAutoCleanupService)
         }
     }
 

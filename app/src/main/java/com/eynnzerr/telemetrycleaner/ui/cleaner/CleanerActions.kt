@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,22 +22,29 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -142,86 +150,143 @@ private fun FloatingSelectionToolbar(
     enabled: Boolean,
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     val count = state.selectedPackageNames.size
     val canRestore = state.targetsFor(PackageAction.RESTORE).isNotEmpty()
     val canUninstall = state.targetsFor(PackageAction.UNINSTALL).isNotEmpty()
     val selectionA11yLabel = pluralStringResource(R.plurals.selected_components, count, count)
     val buttonContentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
 
-    HorizontalFloatingToolbar(
-        expanded = true,
-        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
-            toolbarContainerColor = colorScheme.surfaceContainerHigh,
-            toolbarContentColor = colorScheme.onSurface,
-        ),
-        expandedShadowElevation = 3.dp,
-        collapsedShadowElevation = 3.dp,
-        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
-        leadingContent = {
-            Text(
-                text = pluralStringResource(R.plurals.selected_components_short, count, count),
-                modifier = Modifier
-                    .padding(end = 12.dp)
-                    .semantics { contentDescription = selectionA11yLabel },
-                style = MaterialTheme.typography.titleSmallEmphasized,
-                color = colorScheme.onSurface,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        trailingContent = {},
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    BoxWithConstraints(contentAlignment = Alignment.Center) {
+        // When both actions are shown on narrow split-screen or enlarged font scales, switch to
+        // tooltip-backed icon buttons so action labels are never clipped off-screen.
+        val useIconOnlyActions = canRestore && canUninstall && maxWidth < (340.dp * fontScale)
+
+        HorizontalFloatingToolbar(
+            expanded = true,
+            colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
+                toolbarContainerColor = colorScheme.surfaceContainerHigh,
+                toolbarContentColor = colorScheme.onSurface,
+            ),
+            expandedShadowElevation = 3.dp,
+            collapsedShadowElevation = 3.dp,
+            contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
+            leadingContent = {
+                Text(
+                    text = pluralStringResource(R.plurals.selected_components_short, count, count),
+                    modifier = Modifier
+                        .padding(end = 12.dp)
+                        .semantics { contentDescription = selectionA11yLabel },
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            trailingContent = {},
         ) {
-            if (canRestore) {
-                Button(
-                    onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.RESTORE)) },
-                    enabled = enabled,
-                    shapes = ButtonDefaults.shapes(),
-                    contentPadding = buttonContentPadding,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colorScheme.primary,
-                        contentColor = colorScheme.onPrimary,
-                    ),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_restore),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        text = stringResource(R.string.restore),
-                        maxLines = 1,
-                        softWrap = false,
-                    )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (canRestore) {
+                    val restoreLabel = stringResource(R.string.restore)
+                    if (useIconOnlyActions) {
+                        TooltipBox(
+                            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                            tooltip = { PlainTooltip { Text(restoreLabel) } },
+                            state = rememberTooltipState(),
+                        ) {
+                            FilledIconButton(
+                                onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.RESTORE)) },
+                                enabled = enabled,
+                                shapes = IconButtonDefaults.shapes(),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = colorScheme.primary,
+                                    contentColor = colorScheme.onPrimary,
+                                ),
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_restore),
+                                    contentDescription = restoreLabel,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.RESTORE)) },
+                            enabled = enabled,
+                            shapes = ButtonDefaults.shapes(),
+                            contentPadding = buttonContentPadding,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colorScheme.primary,
+                                contentColor = colorScheme.onPrimary,
+                            ),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_restore),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = restoreLabel,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
                 }
-            }
-            if (canUninstall) {
-                Button(
-                    onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.UNINSTALL)) },
-                    enabled = enabled,
-                    shapes = ButtonDefaults.shapes(),
-                    contentPadding = buttonContentPadding,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colorScheme.error,
-                        contentColor = colorScheme.onError,
-                    ),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_delete),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        text = stringResource(R.string.uninstall),
-                        maxLines = 1,
-                        softWrap = false,
-                    )
+                if (canUninstall) {
+                    val uninstallLabel = stringResource(R.string.uninstall)
+                    if (useIconOnlyActions) {
+                        TooltipBox(
+                            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                            tooltip = { PlainTooltip { Text(uninstallLabel) } },
+                            state = rememberTooltipState(),
+                        ) {
+                            FilledIconButton(
+                                onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.UNINSTALL)) },
+                                enabled = enabled,
+                                shapes = IconButtonDefaults.shapes(),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = colorScheme.error,
+                                    contentColor = colorScheme.onError,
+                                ),
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_delete),
+                                    contentDescription = uninstallLabel,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = { onIntent(CleanerIntent.RequestAction(PackageAction.UNINSTALL)) },
+                            enabled = enabled,
+                            shapes = ButtonDefaults.shapes(),
+                            contentPadding = buttonContentPadding,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colorScheme.error,
+                                contentColor = colorScheme.onError,
+                            ),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_delete),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = uninstallLabel,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
                 }
             }
         }

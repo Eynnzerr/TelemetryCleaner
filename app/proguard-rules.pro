@@ -10,6 +10,6 @@
 # Navigation 3 NavKeySerializer resolves @Serializable route classes reflectively by name.
 -keepnames class * implements androidx.navigation3.runtime.NavKey
 -keepclassmembers class * implements androidx.navigation3.runtime.NavKey {
-    public static *** serializer();
-    public *** INSTANCE;
+    public *** serializer();
+    public static final *** INSTANCE;
 }

@@ -96,7 +96,7 @@ internal fun CleanerState.shouldShowFloatingStatusPill(isSummaryVisible: Boolean
         connection.status == PrivilegeStatus.READY &&
         error == null &&
         key.installedCount != null &&
-        !(key.installedCount == 0 && key.hasIncompleteResults)
+        !key.hasIncompleteResults
     return !isNominalInstalledSummary
 }
 
@@ -206,6 +206,7 @@ private fun summaryPresentation(state: CleanerState): SummaryPresentation {
     val pillText = when {
         !busy && state.error != null -> stringResource(state.error.messageRes())
         !busy && !ready -> connectionLabel
+        !busy && hasIncompleteResults -> stringResource(R.string.summary_scan_incomplete)
         else -> summaryTitle
     }
 

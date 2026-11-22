@@ -209,6 +209,7 @@
     <string name="confirm_uninstall">Uninstall components</string>
     <string name="confirm_restore">Restore components</string>
     <string name="uninstall_description">This uninstalls the components from the selected spaces and clears their local data.</string>
+    <string name="confirm_uninstall_last_apk_warning">Cannot restore after uninstall (removes the last APK on this device)</string>
     <string name="restore_description">Disabled components will be re-enabled. Uninstalled components will be restored using the APK on this device.</string>
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>

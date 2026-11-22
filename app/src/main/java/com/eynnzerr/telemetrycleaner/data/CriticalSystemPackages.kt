@@ -16,12 +16,13 @@ import com.eynnzerr.telemetrycleaner.BuildConfig
 internal object CriticalSystemPackages {
     /** Ordered backing list exposed for duplicate-detection unit tests. */
     internal val entries: List<String> = listOf(
-        // AOSP, Android Mainline, and Google variants (25)
+        // AOSP, Android Mainline, and Google variants (26)
         "android",
         "com.android.systemui",
         "com.android.settings",
         "com.android.providers.settings",
         "com.android.launcher3",
+        "com.google.android.apps.nexuslauncher",
         "com.android.phone",
         "com.android.server.telecom",
         "com.android.providers.telephony",

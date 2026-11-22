@@ -6,13 +6,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -100,17 +99,19 @@ fun CleanerScreen(
                     top = 8.dp,
                     bottom = (if (hasSelectionActions) 112.dp else 24.dp) + insets.calculateBottomPadding(),
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap),
             ) {
-                item(key = "summary") { SummaryCard(state, onIntent) }
+                item(key = "summary") {
+                    Box(Modifier.padding(bottom = 10.dp)) { SummaryCard(state, onIntent) }
+                }
                 state.error?.let { error ->
                     item(key = "error") {
-                        CleanerErrorCard(error)
+                        Box(Modifier.padding(bottom = 10.dp)) { CleanerErrorCard(error) }
                     }
                 }
                 state.snapshot?.let { snapshot ->
                     item(key = "carrier_heading") {
-                        CarrierSectionHeading(state, onIntent)
+                        Box(Modifier.padding(bottom = 10.dp)) { CarrierSectionHeading(state, onIntent) }
                     }
 
                     val carrierData = Carrier.entries.map { carrier ->
@@ -127,21 +128,26 @@ fun CleanerScreen(
 
                     activeCarriers.forEach { (carrier, visible, pair) ->
                         item(key = "carrier_${carrier.name}") {
-                            PackageCard(
-                                title = carrier.label(),
-                                packages = visible,
-                                snapshot = snapshot,
-                                state = state,
-                                onIntent = onIntent,
-                                issues = pair.second,
-                                watermark = carrier,
-                            )
+                            Box(Modifier.padding(bottom = 10.dp)) {
+                                PackageCard(
+                                    title = carrier.label(),
+                                    packages = visible,
+                                    snapshot = snapshot,
+                                    state = state,
+                                    onIntent = onIntent,
+                                    issues = pair.second,
+                                    watermark = carrier,
+                                )
+                            }
                         }
                     }
 
                     if (emptyCarriers.isNotEmpty()) {
                         item(key = "carrier_empty_group") {
-                            Column(verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap)) {
+                            Column(
+                                modifier = Modifier.padding(bottom = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap),
+                            ) {
                                 emptyCarriers.forEachIndexed { index, (carrier, _, pair) ->
                                     val entries = pair.first
                                     val statusLabel = when {
@@ -174,45 +180,44 @@ fun CleanerScreen(
                         if (visible.isEmpty() && issues.isEmpty()) return@forEach
 
                         item(key = "manufacturer_${family.name}") {
-                            PackageCard(
-                                title = when (family) {
-                                    PackageFamily.COLOR_OS -> R.string.manufacturer_oppo
-                                    PackageFamily.XIAOMI -> R.string.manufacturer_xiaomi
-                                    else -> family.label()
-                                },
-                                packages = visible,
-                                snapshot = snapshot,
-                                state = state,
-                                onIntent = onIntent,
-                                issues = issues,
-                            )
+                            Box(Modifier.padding(bottom = 10.dp)) {
+                                PackageCard(
+                                    title = when (family) {
+                                        PackageFamily.COLOR_OS -> R.string.manufacturer_oppo
+                                        PackageFamily.XIAOMI -> R.string.manufacturer_xiaomi
+                                        else -> family.label()
+                                    },
+                                    packages = visible,
+                                    snapshot = snapshot,
+                                    state = state,
+                                    onIntent = onIntent,
+                                    issues = issues,
+                                )
+                            }
                         }
                     }
 
                     val custom = snapshot.packages.filter { it.entry.packageName in customPackageNames }
                     if (custom.isNotEmpty()) {
                         item(key = "custom_heading") {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                stringResource(R.string.section_custom_packages),
-                                modifier = Modifier.padding(start = 8.dp).semantics { heading() },
-                                style = MaterialTheme.typography.titleLargeEmphasized,
-                            )
-                        }
-                        item(key = "custom_group") {
-                            Column(verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap)) {
-                                custom.forEachIndexed { index, result ->
-                                    CustomPackageSegmentedCard(
-                                        result = result,
-                                        snapshot = snapshot,
-                                        state = state,
-                                        index = index,
-                                        count = custom.size,
-                                        onIntent = onIntent,
-                                        onRemove = onRemoveCustomPackage,
-                                    )
-                                }
+                            Column(Modifier.padding(top = 4.dp, bottom = 10.dp)) {
+                                Text(
+                                    stringResource(R.string.section_custom_packages),
+                                    modifier = Modifier.padding(start = 8.dp).semantics { heading() },
+                                    style = MaterialTheme.typography.titleLargeEmphasized,
+                                )
                             }
+                        }
+                        itemsIndexed(custom, key = { _, result -> "custom_${result.entry.packageName}" }) { index, result ->
+                            CustomPackageSegmentedCard(
+                                result = result,
+                                snapshot = snapshot,
+                                state = state,
+                                index = index,
+                                count = custom.size,
+                                onIntent = onIntent,
+                                onRemove = onRemoveCustomPackage,
+                            )
                         }
                     }
                 }

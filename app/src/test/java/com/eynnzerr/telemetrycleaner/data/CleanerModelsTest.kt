@@ -73,17 +73,16 @@ class CleanerModelsTest {
             ),
         )
 
-        // Manual uninstall excludes disabled packages when includeDisabledForUninstall = false
-        val manualUninstall = snapshot.targetsFor(
+        // Default uninstall (both manual and auto-cleanup) excludes disabled packages
+        val defaultUninstall = snapshot.targetsFor(
             action = PackageAction.UNINSTALL,
             selectedUserIds = setOf(0),
             requireVerifiedSystemIdentity = false,
-            includeDisabledForUninstall = false,
         )
-        assertEquals(listOf(ChangeTarget(pkgInstalled.packageName, 0)), manualUninstall)
+        assertEquals(listOf(ChangeTarget(pkgInstalled.packageName, 0)), defaultUninstall)
 
-        // Auto cleanup uninstall includes disabled packages when includeDisabledForUninstall = true
-        val autoUninstall = snapshot.targetsFor(
+        // Explicit includeDisabledForUninstall = true includes disabled packages when requested
+        val uninstallIncludingDisabled = snapshot.targetsFor(
             action = PackageAction.UNINSTALL,
             selectedUserIds = setOf(0),
             requireVerifiedSystemIdentity = true,
@@ -95,7 +94,7 @@ class CleanerModelsTest {
                 ChangeTarget(pkgUserDisabled.packageName, 0),
                 ChangeTarget(pkgSystemDisabled.packageName, 0),
             ),
-            autoUninstall,
+            uninstallIncludingDisabled,
         )
 
         // Disable targets only INSTALLED packages
@@ -119,5 +118,63 @@ class CleanerModelsTest {
             ),
             restoreTargets,
         )
+    }
+
+    @Test
+    fun targetsFor_bindsUserSerialNumberForNonCurrentProfiles() {
+        val owner = AndroidUser(0, "Owner", serialNumber = 0L)
+        val clone = AndroidUser(10, "system_clone", serialNumber = 99L)
+        val pkg = PackageEntry("com.example.pkg", "Pkg", emptySet())
+        val snapshot = ScanSnapshot(
+            currentUserId = owner.id,
+            users = listOf(owner, clone),
+            packages = listOf(
+                DetectedPackage(
+                    entry = pkg,
+                    versionName = "1.0",
+                    versionCode = 1L,
+                    systemPath = "/system/app/Pkg",
+                    users = mapOf(owner.id to PackageState.INSTALLED, clone.id to PackageState.INSTALLED),
+                    hasVerifiedSystemIdentity = true,
+                ),
+            ),
+        )
+
+        val targets = snapshot.targetsFor(
+            action = PackageAction.UNINSTALL,
+            selectedUserIds = setOf(owner.id, clone.id),
+            requireVerifiedSystemIdentity = false,
+        )
+        assertEquals(
+            listOf(
+                ChangeTarget(pkg.packageName, owner.id, userSerialNumber = null),
+                ChangeTarget(pkg.packageName, clone.id, userSerialNumber = 99L),
+            ),
+            targets,
+        )
+    }
+
+    @Test
+    fun losesApkOnUninstall_detectsLastUserAppCopyAccurately() {
+        val entry = PackageEntry("com.example.userapp", "UserApp", emptySet())
+        val multiSpaceUserApp = DetectedPackage(
+            entry = entry,
+            versionName = "1.0",
+            versionCode = 1L,
+            systemPath = "/data/app/base.apk",
+            users = mapOf(0 to PackageState.INSTALLED, 10 to PackageState.INSTALLED),
+            hasVerifiedSystemIdentity = false,
+            hasSystemCopy = false,
+        )
+        val systemApp = multiSpaceUserApp.copy(hasSystemCopy = true)
+
+        assertFalse(systemApp.losesApkOnUninstall(setOf(0, 10)))
+        assertFalse(multiSpaceUserApp.losesApkOnUninstall(setOf(0)))
+        assertTrue(multiSpaceUserApp.losesApkOnUninstall(setOf(0, 10)))
+
+        val disabledOtherSpace = multiSpaceUserApp.copy(
+            users = mapOf(0 to PackageState.INSTALLED, 10 to PackageState.DISABLED),
+        )
+        assertFalse(disabledOtherSpace.losesApkOnUninstall(setOf(0, 10)))
     }
 }

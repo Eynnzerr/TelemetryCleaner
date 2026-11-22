@@ -37,6 +37,7 @@ class PackageDirectoryValidationTest {
             "com.android.systemui",
             "com.android.settings",
             "com.android.phone",
+            "com.google.android.apps.nexuslauncher",
             "com.google.android.permissioncontroller",
             "com.google.android.networkstack",
             "com.google.android.documentsui",

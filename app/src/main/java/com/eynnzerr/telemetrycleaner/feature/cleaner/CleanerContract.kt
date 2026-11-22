@@ -1,7 +1,9 @@
 package com.eynnzerr.telemetrycleaner.feature.cleaner
 
+import com.eynnzerr.telemetrycleaner.data.AndroidUser
 import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
 import com.eynnzerr.telemetrycleaner.data.ChangeTarget
+import com.eynnzerr.telemetrycleaner.data.DetectedPackage
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
 import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
@@ -91,6 +93,24 @@ data class CleanerState(
         ).orEmpty()
     }
 
+    /** Returns the eligible spaces for one already-resolved [detected] package in O(spaces). */
+    fun targetsFor(action: PackageAction, detected: DetectedPackage): List<ChangeTarget> {
+        if (!readyForActions) return emptyList()
+        val snap = snapshot ?: return emptyList()
+        return detected.targetsFor(
+            action = action,
+            selectedUserIds = selectedUserIds,
+            usersById = snap.users.associateBy(AndroidUser::id),
+            currentUserId = snap.currentUserId,
+            requireVerifiedSystemIdentity = false,
+            includeDisabledForUninstall = false,
+        )
+    }
+
+    /** Whether [detected] can be selected for a batch action in any chosen space in O(spaces). */
+    fun canSelectPackage(detected: DetectedPackage): Boolean =
+        PackageAction.entries.any { action -> targetsFor(action, detected).isNotEmpty() }
+
     /** Whether [packageName] can be selected for a batch action in any chosen space. */
     fun canSelectPackage(packageName: String): Boolean =
         PackageAction.entries.any { action -> targetsFor(action, packageName).isNotEmpty() }
@@ -98,7 +118,7 @@ data class CleanerState(
     /** Returns the packages with an available action in the selected spaces. */
     fun selectablePackageNames(): Set<String> =
         snapshot?.packages.orEmpty()
-            .filter { canSelectPackage(it.entry.packageName) }
+            .filter { canSelectPackage(it) }
             .mapTo(mutableSetOf()) { it.entry.packageName }
 }
 

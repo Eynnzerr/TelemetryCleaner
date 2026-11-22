@@ -203,6 +203,7 @@
     <string name="confirm_uninstall">卸载组件</string>
     <string name="confirm_restore">恢复组件</string>
     <string name="uninstall_description">将卸载所选空间中的组件并清除组件数据。</string>
+    <string name="confirm_uninstall_last_apk_warning">卸载后无法恢复（将移除设备上最后一份 APK）</string>
     <string name="restore_description">已停用的组件将重新启用，已卸载的组件将用设备上保留的 APK 恢复。</string>
     <string name="cancel">取消</string>
     <string name="done">完成</string>

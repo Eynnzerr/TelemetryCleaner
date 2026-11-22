@@ -107,6 +107,46 @@ data class DetectedPackage(
     fun hasVisibleRecord(): Boolean = systemPath != null || users.values.any {
         it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
     }
+
+    /**
+     * Whether uninstalling this package in [targetUserIds] removes the last APK copy on the device
+     * (applies to non-system apps with no surviving copy in any other or disabled space).
+     */
+    fun losesApkOnUninstall(targetUserIds: Set<Int>): Boolean =
+        hasSystemCopy == false && users.none { (userId, status) ->
+            status == PackageState.UNKNOWN ||
+                status == PackageState.DISABLED ||
+                (userId !in targetUserIds && status == PackageState.INSTALLED)
+        }
+
+    /** Resolves actionable spaces for this single package without scanning the whole snapshot. */
+    internal fun targetsFor(
+        action: PackageAction,
+        selectedUserIds: Set<Int>,
+        usersById: Map<Int, AndroidUser> = emptyMap(),
+        currentUserId: Int? = null,
+        requireVerifiedSystemIdentity: Boolean = true,
+        includeDisabledForUninstall: Boolean = false,
+    ): List<ChangeTarget> {
+        if (requireVerifiedSystemIdentity && !hasVerifiedSystemIdentity) return emptyList()
+        return selectedUserIds.filter { userId ->
+            val state = users[userId]
+            when (action) {
+                PackageAction.UNINSTALL -> state.permits(action) &&
+                    (includeDisabledForUninstall || state != PackageState.DISABLED)
+                PackageAction.DISABLE -> state.permits(action)
+                PackageAction.RESTORE -> state.permits(action) ||
+                    (state == PackageState.DISABLED && userId in userDisabledIds)
+            }
+        }.map { userId ->
+            val serial = if (currentUserId == null || userId != currentUserId) {
+                usersById[userId]?.serialNumber
+            } else {
+                null
+            }
+            ChangeTarget(entry.packageName, userId, serial)
+        }
+    }
 }
 
 /**
@@ -127,23 +167,22 @@ data class ScanSnapshot(
         selectedUserIds: Set<Int>,
         packageNames: Set<String>? = null,
         requireVerifiedSystemIdentity: Boolean = true,
-        includeDisabledForUninstall: Boolean = true,
-    ): List<ChangeTarget> = packages
-        .filter { packageNames == null || it.entry.packageName in packageNames }
-        .filter { !requireVerifiedSystemIdentity || it.hasVerifiedSystemIdentity }
-        .flatMap { detected ->
-            selectedUserIds.filter { userId ->
-                val state = detected.users[userId]
-                when (action) {
-                    PackageAction.UNINSTALL -> state.permits(action) &&
-                        (includeDisabledForUninstall || state != PackageState.DISABLED)
-                    PackageAction.DISABLE -> state.permits(action)
-                    PackageAction.RESTORE -> state.permits(action) ||
-                        (state == PackageState.DISABLED && userId in detected.userDisabledIds)
-                }
+        includeDisabledForUninstall: Boolean = false,
+    ): List<ChangeTarget> {
+        val usersById = users.associateBy(AndroidUser::id)
+        return packages
+            .filter { packageNames == null || it.entry.packageName in packageNames }
+            .flatMap { detected ->
+                detected.targetsFor(
+                    action = action,
+                    selectedUserIds = selectedUserIds,
+                    usersById = usersById,
+                    currentUserId = currentUserId,
+                    requireVerifiedSystemIdentity = requireVerifiedSystemIdentity,
+                    includeDisabledForUninstall = includeDisabledForUninstall,
+                )
             }
-                .map { userId -> ChangeTarget(detected.entry.packageName, userId) }
-        }
+    }
 }
 
 /** The supported per-user mutations. */
@@ -161,8 +200,13 @@ internal fun PackageState?.permits(action: PackageAction): Boolean = when (actio
  *
  * @property packageName The exact package name selected from the directory.
  * @property userId The explicit Android user ID to change.
+ * @property userSerialNumber The profile serial captured during scan to prevent recycled-user mismatches.
  */
-data class ChangeTarget(val packageName: String, val userId: Int)
+data class ChangeTarget(
+    val packageName: String,
+    val userId: Int,
+    val userSerialNumber: Long? = null,
+)
 
 /** Structured reason why a requested package change failed or could not be confirmed. */
 sealed interface ChangeFailure {

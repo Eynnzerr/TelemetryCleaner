@@ -47,6 +47,30 @@ internal sealed interface PackageReading {
     data class Unavailable(val issue: PackageScanIssue) : PackageReading
 }
 
+/** Outcome of checking whether a package exists in an actionable state on the device. */
+internal sealed interface PackageLookupResult {
+    data class Found(val record: PackageRecord) : PackageLookupResult
+    data object Missing : PackageLookupResult
+    data object Unavailable : PackageLookupResult
+}
+
+/**
+ * Classifies a raw [PackageReading] for exact-package directory verification.
+ * Rejects stale package headers whose users are all [PackageState.NOT_FOUND] (no APK / uninstalled remnant).
+ */
+internal fun PackageReading.toLookupResult(): PackageLookupResult = when (this) {
+    PackageReading.Missing -> PackageLookupResult.Missing
+    is PackageReading.Unavailable -> PackageLookupResult.Unavailable
+    is PackageReading.Found -> when {
+        record.users.values.any {
+            it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
+        } -> PackageLookupResult.Found(record)
+        record.users.isNotEmpty() && record.users.values.all { it == PackageState.NOT_FOUND } ->
+            PackageLookupResult.Missing
+        else -> PackageLookupResult.Unavailable
+    }
+}
+
 /** Indicates why the user spaces needed to start a scan could not be determined. */
 internal class UserListScanException(val issue: PackageScanIssue) : Exception()
 
@@ -189,6 +213,7 @@ internal class PackageCommands(
      * [requireVerifiedSystemIdentity] enforces the package identity check for background cleanup.
      * [captureDenialLog] keeps the system response for rejected interactive uninstalls.
      * [disableOnUninstallFailure] permits one ordinary package disable if an uninstall leaves the package installed.
+     * [allowDisabledForUninstall] controls whether an already-disabled package may still be uninstalled.
      * [deleteThroughAppProcess] retries one uninstall directly through app_process when the
      * command layer fails. The original system error still describes a failed retry.
      */
@@ -198,8 +223,9 @@ internal class PackageCommands(
         requireVerifiedSystemIdentity: Boolean,
         captureDenialLog: Boolean,
         disableOnUninstallFailure: Boolean,
+        allowDisabledForUninstall: Boolean = false,
         canSubmit: suspend () -> Boolean = { true },
-        deleteThroughAppProcess: ((String, Int) -> PackageFallbackResult)? = null,
+        deleteThroughAppProcess: ((String, Int, Long?) -> PackageFallbackResult)? = null,
     ): ChangeOutcome {
         val packageName = target.packageName
         val reading = read(packageName)
@@ -218,6 +244,14 @@ internal class PackageCommands(
         val reenable = action == PackageAction.RESTORE && state == PackageState.DISABLED
         if (reenable && record.enabledSettings[target.userId] != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
             return ChangeOutcome(target, false, ChangeFailure.DisabledBySystem)
+        }
+        if (action == PackageAction.UNINSTALL && state == PackageState.DISABLED && !allowDisabledForUninstall) {
+            return if (requireVerifiedSystemIdentity) {
+                // Background cleanup skips already-frozen packages without wiping user data or recording a failure.
+                ChangeOutcome(target, true, null)
+            } else {
+                ChangeOutcome(target, false, ChangeFailure.NotEnabledInSpace)
+            }
         }
         if (!reenable && reading.matches(target, action)) return ChangeOutcome(target, true, null)
         if (!reenable && !state.permits(action)) {
@@ -243,7 +277,9 @@ internal class PackageCommands(
                 listOf("install-existing", "--user", userId, "--wait", packageName)
             }
         }
+        currentCoroutineContext().ensureActive()
         if (!canSubmit()) return ChangeOutcome(target, false, null)
+        currentCoroutineContext().ensureActive()
         val startedAt = System.currentTimeMillis()
         val attempt = executeChange(command)
         // A rejected Binder reply can arrive after the service applied the command.
@@ -259,11 +295,14 @@ internal class PackageCommands(
             return ChangeOutcome(target, true, null)
         }
 
+        val postCanUninstall = post == PackageState.INSTALLED ||
+            (allowDisabledForUninstall && post == PackageState.DISABLED)
+        val postVersionMatches = record.versionCode == null || afterRequest.versionCode() == record.versionCode
         val fallback = if (deleteThroughAppProcess != null && action == PackageAction.UNINSTALL &&
-            post != null && post != PackageState.UNKNOWN && canSubmit()
+            postCanUninstall && postVersionMatches && canSubmit()
         ) {
             currentCoroutineContext().ensureActive()
-            deleteThroughAppProcess(packageName, target.userId)
+            deleteThroughAppProcess(packageName, target.userId, record.versionCode)
         } else {
             null
         }
@@ -278,7 +317,9 @@ internal class PackageCommands(
             val currentState = readUserState(target, current)
             if (current.matches(target, action)) return ChangeOutcome(target, true, null)
             val enabled = current.enabledFor(target.userId)
+            val currentVersionMatches = record.versionCode == null || current.versionCode() == record.versionCode
             if (currentState == PackageState.INSTALLED &&
+                currentVersionMatches &&
                 (enabled == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT ||
                     enabled == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) &&
                 canSubmit()
@@ -376,6 +417,10 @@ internal class PackageCommands(
         PackageReading.Missing -> PackageState.NOT_FOUND
         is PackageReading.Unavailable -> null
     }
+
+    /** Reads the raw version code from a successful dump reading, when present. */
+    private fun PackageReading.versionCode(): Long? =
+        (this as? PackageReading.Found)?.record?.versionCode
 
     /** Verifies the resulting state, distinguishing a user freeze from system-disabled states. */
     private fun PackageReading.matches(target: ChangeTarget, action: PackageAction): Boolean {

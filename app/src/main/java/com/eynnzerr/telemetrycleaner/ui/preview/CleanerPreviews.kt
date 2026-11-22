@@ -383,6 +383,14 @@ private fun CleanerSheetPreviewContent(
 /** Shows both localized titles and checks the summary card on a narrower screen. */
 @Preview(name = "English · narrow", group = "语言与主题", widthDp = 340, heightDp = 760, locale = "en")
 @Preview(
+    name = "English · narrow · large font · mixed selection",
+    group = "语言与主题",
+    widthDp = 320,
+    heightDp = 760,
+    locale = "en",
+    fontScale = 1.35f,
+)
+@Preview(
     name = "简体中文 · 深色",
     group = "语言与主题",
     widthDp = 400,
@@ -394,8 +402,11 @@ private fun CleanerSheetPreviewContent(
 private fun CleanerLocaleAndThemePreview() {
     TelemetryCleanerTheme(dynamicColor = false) {
         CleanerScreen(
-            scan, onIntent = {}, onOpenSettings = {},
-            customPackageNames = emptySet(), onRemoveCustomPackage = {},
+            scan.copy(selectedPackageNames = setOf(unicom.packageName, telecom.packageName)),
+            onIntent = {},
+            onOpenSettings = {},
+            customPackageNames = emptySet(),
+            onRemoveCustomPackage = {},
         )
     }
 }
