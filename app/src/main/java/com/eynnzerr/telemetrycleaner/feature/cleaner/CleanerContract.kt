@@ -109,17 +109,22 @@ data class CleanerState(
 
     /** Whether [detected] can be selected for a batch action in any chosen space in O(spaces). */
     fun canSelectPackage(detected: DetectedPackage): Boolean =
-        PackageAction.entries.any { action -> targetsFor(action, detected).isNotEmpty() }
+        readyForActions && detected.hasActionIn(selectedUserIds)
 
     /** Whether [packageName] can be selected for a batch action in any chosen space. */
-    fun canSelectPackage(packageName: String): Boolean =
-        PackageAction.entries.any { action -> targetsFor(action, packageName).isNotEmpty() }
+    fun canSelectPackage(packageName: String): Boolean {
+        if (!readyForActions) return false
+        val detected = snapshot?.packages?.firstOrNull { it.entry.packageName == packageName } ?: return false
+        return detected.hasActionIn(selectedUserIds)
+    }
 
-    /** Returns the packages with an available action in the selected spaces. */
-    fun selectablePackageNames(): Set<String> =
-        snapshot?.packages.orEmpty()
-            .filter { canSelectPackage(it) }
+    /** Returns the packages with an available action in the selected spaces in a single O(packages * spaces) pass. */
+    fun selectablePackageNames(): Set<String> {
+        if (!readyForActions) return emptySet()
+        return snapshot?.packages.orEmpty()
+            .filter { it.hasActionIn(selectedUserIds) }
             .mapTo(mutableSetOf()) { it.entry.packageName }
+    }
 }
 
 /** User interactions accepted by the cleaner store. */

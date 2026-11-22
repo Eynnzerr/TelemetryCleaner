@@ -13,6 +13,7 @@ import com.eynnzerr.telemetrycleaner.feature.packages.PackageDirectoryViewModel
 import com.eynnzerr.telemetrycleaner.feature.settings.SettingsViewModel
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.startKoin
+import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
@@ -27,7 +28,7 @@ private val cleanerModule = module {
     single { PrivilegeSessionManager(androidContext(), get()) }
     single { CleanerRepository(androidContext(), get(), get()) }
     viewModelOf(::CleanerViewModel)
-    viewModelOf(::PackageDirectoryViewModel)
+    viewModel { PackageDirectoryViewModel(get<CleanerRepository>(), get()) }
     viewModelOf(::SettingsViewModel)
     viewModelOf(::AutoCleanupHistoryViewModel)
 }

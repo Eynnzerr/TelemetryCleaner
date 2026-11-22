@@ -15,6 +15,7 @@ import com.eynnzerr.telemetrycleaner.data.PackageDirectory
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
 import java.io.IOException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -69,7 +71,10 @@ internal enum class AutoCleanupStatus {
 }
 
 /** Persists cleaner settings and exposes the live service status. */
-internal class CleanerSettings(private val store: DataStore<Preferences>) {
+internal class CleanerSettings(
+    private val store: DataStore<Preferences>,
+    private val logWarning: (String, Throwable) -> Unit = { message, failure -> Log.w(TAG, message, failure) },
+) {
     /** Makes a cleanup submission wait for any in-flight settings write. */
     private val settingsAccess = Mutex()
 
@@ -94,7 +99,7 @@ internal class CleanerSettings(private val store: DataStore<Preferences>) {
         }
         .catch { failure ->
             if (failure !is IOException) throw failure
-            Log.w(TAG, "Unable to read cleaner settings", failure)
+            logWarning("Unable to read cleaner settings", failure)
             emit(
                 CleanerPreferences(
                     autoCleanupEnabled = false,
@@ -111,12 +116,20 @@ internal class CleanerSettings(private val store: DataStore<Preferences>) {
     /** Reports runtime status independently from the persisted switch. */
     val autoCleanupStatus: StateFlow<AutoCleanupStatus> = mutableAutoCleanupStatus.asStateFlow()
 
+    /** Buffers enable-save failures reported by [com.eynnzerr.telemetrycleaner.service.AutoCleanupService]. */
+    private val autoCleanupEnableSaveFailures = Channel<Unit>(Channel.CONFLATED)
+
+    /** Emits when persisting an explicit foreground enable request fails inside the service. */
+    val autoCleanupEnableSaveFailureEvents: Flow<Unit> = autoCleanupEnableSaveFailures.receiveAsFlow()
+
     /** Reads the saved settings after any in-flight settings write. */
     suspend fun readPreferences(): CleanerPreferences = settingsAccess.withLock { preferences.first() }
 
     /** Saves the user's choice and reports whether the write succeeded. */
     suspend fun setAutoCleanupEnabled(enabled: Boolean): Boolean =
-        save { it[AUTO_CLEANUP_ENABLED] = enabled }
+        save { it[AUTO_CLEANUP_ENABLED] = enabled }.also { saved ->
+            if (saved && enabled) autoCleanupEnableSaveFailures.tryReceive()
+        }
 
     /** Saves the preference for disabling a package after a failed manual uninstall. */
     suspend fun setDisableOnUninstallFailure(enabled: Boolean): Boolean =
@@ -159,13 +172,18 @@ internal class CleanerSettings(private val store: DataStore<Preferences>) {
         mutableAutoCleanupStatus.value = status
     }
 
+    /** Notifies the settings UI that persisting an explicit auto-cleanup enable request failed. */
+    fun reportAutoCleanupEnableSaveFailure() {
+        autoCleanupEnableSaveFailures.trySend(Unit)
+    }
+
     /** Writes one settings change before allowing the next cleanup submission to read it. */
     private suspend fun save(change: (MutablePreferences) -> Unit): Boolean = settingsAccess.withLock {
         try {
             store.edit { change(it) }
             true
         } catch (failure: IOException) {
-            Log.w(TAG, "Unable to save cleaner settings", failure)
+            logWarning("Unable to save cleaner settings", failure)
             false
         }
     }

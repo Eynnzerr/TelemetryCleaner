@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
@@ -23,12 +24,16 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
+
+/** Stable locale-independent tag for the Material 3 modal sheet drag handle. */
+internal const val SHEET_DRAG_HANDLE_TAG = "cleaner_sheet_drag_handle"
 
 /** Opens the Expressive modal sheet used by the cleaner and package search. */
 @Composable
@@ -41,6 +46,11 @@ internal fun CleanerModalSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(
+                modifier = Modifier.testTag(SHEET_DRAG_HANDLE_TAG),
+            )
+        },
         content = content,
     )
 }

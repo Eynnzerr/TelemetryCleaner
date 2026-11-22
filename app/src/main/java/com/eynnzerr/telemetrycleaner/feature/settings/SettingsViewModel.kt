@@ -61,6 +61,14 @@ internal class SettingsViewModel(
     private val checkingForUpdate = MutableStateFlow(false)
     private val releaseResult = MutableStateFlow<ReleaseCheckResult?>(null)
 
+    init {
+        viewModelScope.launch {
+            settings.autoCleanupEnableSaveFailureEvents.collect {
+                eventChannel.send(SettingsEvent.SaveFailed)
+            }
+        }
+    }
+
     val state: StateFlow<SettingsUiState> = combine(
         settings.preferences,
         settings.autoCleanupStatus,

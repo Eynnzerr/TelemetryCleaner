@@ -5,7 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
@@ -20,6 +20,7 @@ import com.eynnzerr.telemetrycleaner.data.PackageState
 import com.eynnzerr.telemetrycleaner.data.PermissionProtection
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
 import com.eynnzerr.telemetrycleaner.ui.components.CleanerModalSheet
+import com.eynnzerr.telemetrycleaner.ui.components.SHEET_DRAG_HANDLE_TAG
 import com.eynnzerr.telemetrycleaner.ui.theme.TelemetryCleanerTheme
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -98,8 +99,8 @@ class PackageDetailsSheetTest {
         composeRule.onNodeWithText("com.oppo.ctautoregist").assertIsDisplayed()
         assertTrue(sheetOpen)
 
-        // 3. Drag the sheet drag handle downward -> sheet dismisses.
-        composeRule.onNodeWithContentDescription("Drag handle", substring = true, ignoreCase = true)
+        // 3. Drag the sheet drag handle downward -> sheet dismisses (locale-independent tag).
+        composeRule.onNodeWithTag(SHEET_DRAG_HANDLE_TAG, useUnmergedTree = true)
             .performTouchInput {
                 swipeDown(
                     startY = center.y,

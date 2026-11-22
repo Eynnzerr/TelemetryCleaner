@@ -24,6 +24,7 @@ internal object PackageDiagnostics {
         fallback: PackageFallbackResult?,
         disableAttempt: Result<PackageShellResult>?,
         afterDisable: PackageState?,
+        submitDeniedOnRetry: Boolean = false,
     ): String = buildString {
         appendLine("Time: ${Instant.ofEpochMilli(startedAt)}")
         appendLine("Package: ${target.packageName}, user: ${target.userId}")
@@ -31,6 +32,9 @@ internal object PackageDiagnostics {
         appendLine("System package: ${record.hasSystemCopy ?: "unknown"}")
         appendLine("State before request: $before; after primary request: ${after ?: "unknown"}")
         appendAttempt("Package service", attempt)
+        if (submitDeniedOnRetry) {
+            appendLine("Retry aborted: target precondition changed before retry")
+        }
         if (fallback == null) {
             appendLine("Helper: not run")
         } else {

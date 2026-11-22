@@ -34,6 +34,8 @@ internal data class PackageRecord(
     val hasSystemCopy: Boolean?,
     val users: Map<Int, PackageState>,
     val enabledSettings: Map<Int, Int>,
+    /** Whether dump fields positively confirm or deny that an APK still exists on disk, or null if ambiguous. */
+    val hasVerifiedApk: Boolean? = null,
     /** The permission details read during an interactive scan. */
     val permissions: List<ComponentPermission>? = null,
 )
@@ -56,7 +58,8 @@ internal sealed interface PackageLookupResult {
 
 /**
  * Classifies a raw [PackageReading] for exact-package directory verification.
- * Rejects stale package headers whose users are all [PackageState.NOT_FOUND] (no APK / uninstalled remnant).
+ * Rejects stale package headers whose users are all [PackageState.NOT_FOUND] (explicit `pkg=null`),
+ * and reports [PackageLookupResult.Unavailable] when APK presence is ambiguous (e.g. bare `codePath`).
  */
 internal fun PackageReading.toLookupResult(): PackageLookupResult = when (this) {
     PackageReading.Missing -> PackageLookupResult.Missing
@@ -65,7 +68,9 @@ internal fun PackageReading.toLookupResult(): PackageLookupResult = when (this) 
         record.users.values.any {
             it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
         } -> PackageLookupResult.Found(record)
-        record.users.isNotEmpty() && record.users.values.all { it == PackageState.NOT_FOUND } ->
+        record.hasVerifiedApk == false &&
+            record.users.isNotEmpty() &&
+            record.users.values.all { it == PackageState.NOT_FOUND } ->
             PackageLookupResult.Missing
         else -> PackageLookupResult.Unavailable
     }
@@ -225,7 +230,8 @@ internal class PackageCommands(
         disableOnUninstallFailure: Boolean,
         allowDisabledForUninstall: Boolean = false,
         canSubmit: suspend () -> Boolean = { true },
-        deleteThroughAppProcess: ((String, Int, Long?) -> PackageFallbackResult)? = null,
+        submitDeniedFailure: ChangeFailure? = null,
+        deleteThroughAppProcess: ((String, Int, Int) -> PackageFallbackResult)? = null,
     ): ChangeOutcome {
         val packageName = target.packageName
         val reading = read(packageName)
@@ -253,6 +259,14 @@ internal class PackageCommands(
                 ChangeOutcome(target, false, ChangeFailure.NotEnabledInSpace)
             }
         }
+        if (action == PackageAction.UNINSTALL &&
+            requireVerifiedSystemIdentity &&
+            !allowDisabledForUninstall &&
+            state == PackageState.INSTALLED &&
+            !record.enabledSettings[target.userId].isExplicitlyEnabled()
+        ) {
+            return ChangeOutcome(target, false, ChangeFailure.SpaceStateUnverified)
+        }
         if (!reenable && reading.matches(target, action)) return ChangeOutcome(target, true, null)
         if (!reenable && !state.permits(action)) {
             val failure = if (action == PackageAction.DISABLE) {
@@ -278,7 +292,7 @@ internal class PackageCommands(
             }
         }
         currentCoroutineContext().ensureActive()
-        if (!canSubmit()) return ChangeOutcome(target, false, null)
+        if (!canSubmit()) return ChangeOutcome(target, false, submitDeniedFailure)
         currentCoroutineContext().ensureActive()
         val startedAt = System.currentTimeMillis()
         val attempt = executeChange(command)
@@ -295,14 +309,22 @@ internal class PackageCommands(
             return ChangeOutcome(target, true, null)
         }
 
-        val postCanUninstall = post == PackageState.INSTALLED ||
+        var submitDeniedOnRetry = false
+        val postCanUninstall = (post == PackageState.INSTALLED &&
+            (!requireVerifiedSystemIdentity || allowDisabledForUninstall || afterRequest.enabledFor(target.userId).isExplicitlyEnabled())) ||
             (allowDisabledForUninstall && post == PackageState.DISABLED)
-        val postVersionMatches = record.versionCode == null || afterRequest.versionCode() == record.versionCode
+        val fallbackVersionCode = record.versionCode?.takeIf { it in 0L..Int.MAX_VALUE.toLong() }?.toInt()
+        val postVersionMatches = record.versionCode != null && afterRequest.versionCode() == record.versionCode
         val fallback = if (deleteThroughAppProcess != null && action == PackageAction.UNINSTALL &&
-            postCanUninstall && postVersionMatches && canSubmit()
+            postCanUninstall && postVersionMatches && fallbackVersionCode != null
         ) {
-            currentCoroutineContext().ensureActive()
-            deleteThroughAppProcess(packageName, target.userId, record.versionCode)
+            if (canSubmit()) {
+                currentCoroutineContext().ensureActive()
+                deleteThroughAppProcess(packageName, target.userId, fallbackVersionCode)
+            } else {
+                submitDeniedOnRetry = true
+                null
+            }
         } else {
             null
         }
@@ -312,42 +334,46 @@ internal class PackageCommands(
 
         var disableAttempt: Result<PackageShellResult>? = null
         var afterDisable: PackageState? = null
-        if (disableOnUninstallFailure && action == PackageAction.UNINSTALL) {
+        if (!submitDeniedOnRetry && disableOnUninstallFailure && action == PackageAction.UNINSTALL) {
             val current = read(packageName)
             val currentState = readUserState(target, current)
             if (current.matches(target, action)) return ChangeOutcome(target, true, null)
             val enabled = current.enabledFor(target.userId)
-            val currentVersionMatches = record.versionCode == null || current.versionCode() == record.versionCode
+            val currentVersionMatches = record.versionCode != null && current.versionCode() == record.versionCode
             if (currentState == PackageState.INSTALLED &&
                 currentVersionMatches &&
-                (enabled == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT ||
-                    enabled == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) &&
-                canSubmit()
+                enabled.isExplicitlyEnabled()
             ) {
-                currentCoroutineContext().ensureActive()
-                disableAttempt = executeChange(target.disableCommand())
-                val updated = read(packageName)
-                afterDisable = readUserState(target, updated)
-                if (updated.matches(target, action)) return ChangeOutcome(target, true, null)
-                if (updated.matches(target, PackageAction.DISABLE)) {
-                    return ChangeOutcome(target, false, null, disabledInstead = true)
+                if (canSubmit()) {
+                    currentCoroutineContext().ensureActive()
+                    disableAttempt = executeChange(target.disableCommand())
+                    val updated = read(packageName)
+                    afterDisable = readUserState(target, updated)
+                    if (updated.matches(target, action)) return ChangeOutcome(target, true, null)
+                    if (updated.matches(target, PackageAction.DISABLE)) {
+                        return ChangeOutcome(target, false, null, disabledInstead = true)
+                    }
+                } else {
+                    submitDeniedOnRetry = true
                 }
             }
         }
 
         val result = attempt.getOrNull()
         val failure = attempt.exceptionOrNull()
-        if (failure != null && failure !is SecurityException && disableAttempt == null) throw failure
+        if (failure != null && failure !is SecurityException && disableAttempt == null && !submitDeniedOnRetry) throw failure
         val rejected = failure is SecurityException ||
             (result != null && (result.exitCode > 0 || result.systemErrorLine() != null))
-        val denialLog = if (captureDenialLog && (rejected || disableAttempt != null)) {
+        val denialLog = if (captureDenialLog && (rejected || disableAttempt != null || submitDeniedOnRetry)) {
             PackageDiagnostics.uninstallDenial(
                 executor, target, record, state, post, startedAt, attempt, fallback, disableAttempt, afterDisable,
+                submitDeniedOnRetry = submitDeniedOnRetry,
             )
         } else {
             null
         }
         val failureReason = when {
+            submitDeniedOnRetry && submitDeniedFailure != null -> submitDeniedFailure
             result != null -> failureReason(result, post)
             failure is SecurityException -> ChangeFailure.SpaceOperationDenied
             else -> ChangeFailure.StateUnverified
@@ -403,6 +429,11 @@ internal class PackageCommands(
     /** Returns the exact package manager enable setting observed for this user. */
     private fun PackageReading.enabledFor(userId: Int): Int? =
         (this as? PackageReading.Found)?.record?.enabledSettings?.get(userId)
+
+    /** Whether Android explicitly reported an enabled (DEFAULT or ENABLED) component state. */
+    private fun Int?.isExplicitlyEnabled(): Boolean =
+        this == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT ||
+            this == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
 
     /** Builds a disable request for the exact package and user in the confirmation. */
     private fun ChangeTarget.disableCommand(): List<String> =
@@ -494,11 +525,13 @@ internal class PackageCommands(
             }
             id to state
         }.toMap()
-        // Package settings can still report a code path after the APK is gone.
-        val hasApk = when (fields.firstOrNull { it.startsWith("pkg=") }?.substringAfter('=')) {
-            "null" -> false
-            null, "" -> isSystem || codePath != null || users.values.any { it.permits(PackageAction.UNINSTALL) }
-            else -> true
+        // Package settings can still report a code path after the APK is gone; bare codePath does not prove APK presence.
+        val pkgValue = fields.firstOrNull { it.startsWith("pkg=") }?.substringAfter('=')
+        val hasVerifiedApk: Boolean? = when {
+            pkgValue == "null" -> false
+            !pkgValue.isNullOrBlank() -> true
+            isSystem || users.values.any { it.permits(PackageAction.UNINSTALL) } -> true
+            else -> null
         }
         return PackageRecord(
             versionName = fields.firstOrNull { it.startsWith("versionName=") }
@@ -510,7 +543,8 @@ internal class PackageCommands(
             hasVerifiedSystemIdentity = isSystem && appId != null && appId >= 10_000,
             hasSystemCopy = isSystem.takeIf { flagFields.isNotEmpty() },
             enabledSettings = enabledSettings,
-            users = if (hasApk) {
+            hasVerifiedApk = hasVerifiedApk,
+            users = if (hasVerifiedApk == true) {
                 users.mapValues { (_, state) -> if (state == PackageState.NOT_FOUND) PackageState.RESTORABLE else state }
             } else {
                 users

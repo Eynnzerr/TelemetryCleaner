@@ -23,21 +23,24 @@ internal object PackageFallback {
     private const val REQUEST_MARKER = "DELETE_REQUESTED"
 
     /**
-     * Asks the hidden package manager interface to delete [packageName] for [userId].
+     * Asks the hidden package manager interface to delete [packageName] for [userId] only when the
+     * installed version matches [expectedVersionCode].
      *
-     * When [expectedVersionCode] fits in a signed 32-bit int, it is forwarded to `deletePackageAsUser`
-     * so concurrent app updates cannot be silently deleted. The caller still verifies the resulting state.
+     * Never falls back to `VERSION_CODE_HIGHEST` (-1) so concurrent app updates cannot be silently deleted.
+     * The caller still verifies the resulting state.
      */
     fun uninstall(
         apkPath: String,
         packageName: String,
         userId: Int,
-        expectedVersionCode: Long? = null,
+        expectedVersionCode: Int,
     ): PackageFallbackResult {
-        val versionArg = expectedVersionCode?.takeIf { it in 0L..Int.MAX_VALUE.toLong() }?.toInt() ?: -1
+        if (expectedVersionCode < 0) {
+            return PackageFallbackResult(false, "Expected version code unavailable for safe deletion")
+        }
         val process = try {
             if (!Shizuku.pingBinder()) return PackageFallbackResult(false, "Shizuku disconnected")
-            startShizukuProcess(command(apkPath, packageName, userId, versionArg))
+            startShizukuProcess(command(apkPath, packageName, userId, expectedVersionCode))
         } catch (failure: Throwable) {
             return PackageFallbackResult(false, "Could not start helper: ${failure.cause ?: failure}")
         }

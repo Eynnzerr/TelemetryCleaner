@@ -50,6 +50,36 @@ internal sealed interface CustomPackageChange {
     data class Removed(val packageName: String) : CustomPackageChange
 }
 
+/**
+ * Persists a custom-directory membership edit under [mutex] so waiting for the lock remains
+ * cancellable, while the write and change-event emission complete atomically once acquired.
+ */
+internal suspend fun commitCustomPackageChange(
+    mutex: Mutex,
+    packageName: String,
+    included: Boolean,
+    persist: suspend (String, Boolean) -> Boolean,
+    emitChange: suspend (CustomPackageChange) -> Unit,
+): Boolean {
+    val blocked = included && (packageName in PackageDirectory.variants || packageName in CriticalSystemPackages.names)
+    if (blocked || packageName in PackageDirectory.variants) return false
+    return mutex.withLock {
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            val saved = persist(packageName, included)
+            if (saved) {
+                val change = if (included) {
+                    CustomPackageChange.Added(packageName)
+                } else {
+                    CustomPackageChange.Removed(packageName)
+                }
+                emitChange(change)
+            }
+            saved
+        }
+    }
+}
+
 /** Coordinates package queries, manual mutations, custom directory edits, and background cleanup. */
 class CleanerRepository internal constructor(
     context: Context,
@@ -122,22 +152,14 @@ class CleanerRepository internal constructor(
         }
     }
 
-    /** Changes directory membership atomically so cancelling a dialog cannot drop the refresh event after commit. */
-    suspend fun setCustomPackage(packageName: String, included: Boolean): Boolean = withContext(NonCancellable) {
-        val saved = customPackagesMutex.withLock {
-            val blocked = included && (packageName in PackageDirectory.variants || packageName in CriticalSystemPackages.names)
-            !blocked && packageName !in PackageDirectory.variants && settings.setCustomPackage(packageName, included)
-        }
-        if (saved) {
-            val change = if (included) {
-                CustomPackageChange.Added(packageName)
-            } else {
-                CustomPackageChange.Removed(packageName)
-            }
-            customPackageChangesFlow.emit(change)
-        }
-        saved
-    }
+    /** Changes directory membership atomically once the mutex is acquired so committed writes always emit refresh events. */
+    suspend fun setCustomPackage(packageName: String, included: Boolean): Boolean = commitCustomPackageChange(
+        mutex = customPackagesMutex,
+        packageName = packageName,
+        included = included,
+        persist = settings::setCustomPackage,
+        emitChange = customPackageChangesFlow::emit,
+    )
 
     /** Resolves an optional application label for a package already identified by the privileged service. */
     private fun customEntry(packageName: String): PackageEntry {
@@ -176,7 +198,6 @@ class CleanerRepository internal constructor(
                     if (action != PackageAction.RESTORE && target.packageName in CriticalSystemPackages.names) {
                         return@map ChangeOutcome(target, false, ChangeFailure.ProtectedSystemPackage)
                     }
-                    var spaceIdentityMismatch = false
                     val outcome = changePackage(
                         commands = commands,
                         backend = backend,
@@ -184,23 +205,17 @@ class CleanerRepository internal constructor(
                         action = action,
                         requireVerifiedSystemIdentity = false,
                         disableOnUninstallFailure = disableOnUninstallFailure,
+                        submitDeniedFailure = ChangeFailure.SpaceStateUnverified,
                         canSubmit = {
                             val expectedSerial = target.userSerialNumber
-                            val matches = expectedSerial == null || userSerialNumber(target.userId) == expectedSerial
-                            if (!matches) spaceIdentityMismatch = true
-                            matches
+                            expectedSerial == null || userSerialNumber(target.userId) == expectedSerial
                         },
                     )
-                    val resolvedOutcome = if (spaceIdentityMismatch && !outcome.success && outcome.failure == null) {
-                        outcome.copy(failure = ChangeFailure.SpaceStateUnverified)
-                    } else {
-                        outcome
-                    }
-                    val denialLog = resolvedOutcome.denialLog
+                    val denialLog = outcome.denialLog
                     if (denialLog == null) {
-                        resolvedOutcome
+                        outcome
                     } else {
-                        resolvedOutcome.copy(denialLog = denialContext(target, backend) + denialLog)
+                        outcome.copy(denialLog = denialContext(target, backend) + denialLog)
                     }
                 }
             }
@@ -288,6 +303,7 @@ class CleanerRepository internal constructor(
         action: PackageAction,
         requireVerifiedSystemIdentity: Boolean = true,
         disableOnUninstallFailure: Boolean = false,
+        submitDeniedFailure: ChangeFailure? = null,
         canSubmit: suspend () -> Boolean = { true },
     ): ChangeOutcome = try {
         if (backend == PrivilegeBackend.SHIZUKU && !sessionManager.isShizukuBinderAlive()) {
@@ -300,6 +316,7 @@ class CleanerRepository internal constructor(
                 captureDenialLog = !requireVerifiedSystemIdentity && action == PackageAction.UNINSTALL,
                 disableOnUninstallFailure = disableOnUninstallFailure,
                 canSubmit = canSubmit,
+                submitDeniedFailure = submitDeniedFailure,
                 deleteThroughAppProcess = if (backend == PrivilegeBackend.SHIZUKU) ::uninstallThroughShizuku else null,
             )
         }
@@ -311,11 +328,11 @@ class CleanerRepository internal constructor(
         ChangeOutcome(target, false, ChangeFailure.StateUnverified)
     }
 
-    /** Runs the existing shell UID uninstall fallback through Shizuku with the expected version constraint. */
+    /** Runs the existing shell UID uninstall fallback through Shizuku with an exact 32-bit version constraint. */
     private fun uninstallThroughShizuku(
         packageName: String,
         userId: Int,
-        expectedVersionCode: Long?,
+        expectedVersionCode: Int,
     ): PackageFallbackResult =
         fallbackApkPath?.let { PackageFallback.uninstall(it, packageName, userId, expectedVersionCode) }
             ?: PackageFallbackResult(false, "Helper APK unavailable")

@@ -244,6 +244,40 @@ class CleanerReducerTest {
     }
 
     @Test
+    fun toggleSpace_retainsOnlyEligibleSelectedPackagesAcrossLargeSelection() {
+        val packages = (0 until 200).map { index ->
+            val onlyOwner = index % 2 == 0
+            DetectedPackage(
+                entry = PackageEntry("com.example.pkg$index", "Pkg $index", emptySet()),
+                versionName = "1.0",
+                versionCode = 1L,
+                systemPath = "/data/app/Pkg$index",
+                users = if (onlyOwner) {
+                    mapOf(0 to PackageState.INSTALLED, 10 to PackageState.NOT_FOUND)
+                } else {
+                    mapOf(0 to PackageState.NOT_FOUND, 10 to PackageState.INSTALLED)
+                },
+                hasVerifiedSystemIdentity = false,
+            )
+        }
+        val snapshot = ScanSnapshot(currentUserId = 0, users = listOf(owner, clone), packages = packages)
+        val allNames = packages.mapTo(mutableSetOf()) { it.entry.packageName }
+        val state = idleReadyState(
+            snapshot = snapshot,
+            selectedUserIds = setOf(0, 10),
+            selectedPackageNames = allNames,
+        )
+
+        val cloneOnly = CleanerReducer.reduce(state, CleanerMessage.Intent(CleanerIntent.ToggleSpace(0)))
+        val expectedClonePackages = (0 until 200)
+            .filter { it % 2 != 0 }
+            .mapTo(mutableSetOf()) { "com.example.pkg$it" }
+        assertEquals(setOf(10), cloneOnly.state.selectedUserIds)
+        assertEquals(expectedClonePackages, cloneOnly.state.selectedPackageNames)
+        assertEquals(expectedClonePackages, cloneOnly.state.selectablePackageNames())
+    }
+
+    @Test
     fun backendSelectionFailed_setsErrorAndDoesNotScan() {
         val switching = idleReadyState().copy(activity = CleanerActivity.SWITCHING_BACKEND)
         val transition = CleanerReducer.reduce(

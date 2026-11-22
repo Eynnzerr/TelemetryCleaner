@@ -364,9 +364,13 @@ internal object CleanerReducer {
         }
     }
 
-    /** Retains only selections that can still be managed in the selected spaces. */
+    /** Retains only selections that can still be managed in the selected spaces in O(packages * spaces). */
     private fun CleanerState.retainEligiblePackages(): CleanerState =
-        copy(selectedPackageNames = selectedPackageNames.filterTo(mutableSetOf()) { canSelectPackage(it) })
+        if (selectedPackageNames.isEmpty()) {
+            this
+        } else {
+            copy(selectedPackageNames = selectedPackageNames intersect selectablePackageNames())
+        }
 
     /** Keeps unaffected observations while marking changed states for verification. */
     private fun ScanSnapshot.invalidate(targets: List<ChangeTarget>): ScanSnapshot {

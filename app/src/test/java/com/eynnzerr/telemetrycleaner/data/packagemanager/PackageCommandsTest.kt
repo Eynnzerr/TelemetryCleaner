@@ -273,7 +273,7 @@ class PackageCommandsTest {
             },
         )
 
-        var capturedVersionCode: Long? = null
+        var capturedVersionCode: Int? = null
         val commands = PackageCommands(executor, clock = { now.also { now += 100L } })
         val outcome = commands.change(
             target = target,
@@ -290,7 +290,7 @@ class PackageCommandsTest {
 
         assertTrue(outcome.success)
         assertNull(outcome.failure)
-        assertEquals(123L, capturedVersionCode)
+        assertEquals(123, capturedVersionCode)
     }
 
     @Test
@@ -429,10 +429,169 @@ class PackageCommandsTest {
             captureDenialLog = false,
             disableOnUninstallFailure = true,
             canSubmit = { false },
+            submitDeniedFailure = ChangeFailure.SpaceStateUnverified,
         )
 
         assertFalse(outcome.success)
+        assertEquals(ChangeFailure.SpaceStateUnverified, outcome.failure)
         assertTrue(executor.executedCommands.isEmpty())
+    }
+
+    @Test
+    fun change_reportsSpaceStateUnverifiedAndPreservesFirstSystemErrorWhenSubmitDeniedOnRetry() = runTest {
+        val pkg = "com.oppo.ctautoregist"
+        val target = ChangeTarget(pkg, userId = 10, userSerialNumber = 42L)
+        var submitChecks = 0
+        var fallbackCalled = false
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_INTERNAL_ERROR]") },
+            onDump = {
+                PackageShellResult(0, packageDump(pkg, userLines = listOf("User 10: installed=true enabled=0")))
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = true,
+            disableOnUninstallFailure = true,
+            canSubmit = {
+                submitChecks += 1
+                submitChecks == 1
+            },
+            submitDeniedFailure = ChangeFailure.SpaceStateUnverified,
+            deleteThroughAppProcess = { _, _, _ ->
+                fallbackCalled = true
+                PackageFallbackResult(true, "Should not run")
+            },
+        )
+
+        assertFalse(outcome.success)
+        assertFalse(outcome.disabledInstead)
+        assertFalse(fallbackCalled)
+        assertEquals(ChangeFailure.SpaceStateUnverified, outcome.failure)
+        assertEquals(1, executor.executedCommands.size)
+        assertEquals("uninstall", executor.executedCommands.single().first())
+        val diagnostics = outcome.denialLog.orEmpty()
+        assertTrue(diagnostics.contains("DELETE_FAILED_INTERNAL_ERROR"))
+        assertTrue(diagnostics.contains("Retry aborted"))
+    }
+
+    @Test
+    fun change_skipsFallbackDeleteWhenVersionCodeExceedsIntMaxValue() = runTest {
+        val pkg = "com.example.longversion"
+        val target = ChangeTarget(pkg, 0)
+        var fallbackCalled = false
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_INTERNAL_ERROR]") },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        versionCode = Int.MAX_VALUE.toLong() + 42L,
+                        flags = "HAS_CODE",
+                        userLines = listOf("User 0: installed=true enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            disableOnUninstallFailure = false,
+            deleteThroughAppProcess = { _, _, _ ->
+                fallbackCalled = true
+                PackageFallbackResult(true, "Should not run")
+            },
+        )
+
+        assertFalse(outcome.success)
+        assertFalse(fallbackCalled)
+        assertEquals(
+            ChangeFailure.SystemError("Failure [DELETE_FAILED_INTERNAL_ERROR]"),
+            outcome.failure,
+        )
+    }
+
+    @Test
+    fun change_skipsFallbackDeleteAndDisableWhenInitialVersionCodeIsMissing() = runTest {
+        val pkg = "com.example.noversion"
+        val target = ChangeTarget(pkg, 0)
+        var fallbackCalled = false
+
+        val dumpWithoutVersion = """
+            Packages:
+              Package [$pkg] (deadbeef):
+                appId=10123
+                pkg=Package{abc $pkg}
+                codePath=/data/app/$pkg
+                pkgFlags=[ HAS_CODE ]
+                User 0: installed=true enabled=0
+        """.trimIndent()
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_INTERNAL_ERROR]") },
+            onDump = { PackageShellResult(0, dumpWithoutVersion) },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            disableOnUninstallFailure = true,
+            deleteThroughAppProcess = { _, _, _ ->
+                fallbackCalled = true
+                PackageFallbackResult(true, "Should not run")
+            },
+        )
+
+        assertFalse(outcome.success)
+        assertFalse(outcome.disabledInstead)
+        assertFalse(fallbackCalled)
+        assertEquals(1, executor.executedCommands.size)
+        assertEquals("uninstall", executor.executedCommands.single().first())
+        assertEquals(
+            ChangeFailure.SystemError("Failure [DELETE_FAILED_INTERNAL_ERROR]"),
+            outcome.failure,
+        )
+    }
+
+    @Test
+    fun change_autoCleanupRejectsMissingOrUnrecognizedEnabledStateWithZeroWrites() = runTest {
+        val pkg = "com.oppo.ctautoregist"
+        val target = ChangeTarget(pkg, 0)
+
+        for (userLine in listOf("User 0: installed=true hidden=false", "User 0: installed=true enabled=9")) {
+            var canSubmitCalled = false
+            val executor = FakePackageExecutor(
+                onDump = { PackageShellResult(0, packageDump(pkg, userLines = listOf(userLine))) },
+            )
+
+            val outcome = PackageCommands(executor).change(
+                target = target,
+                action = PackageAction.UNINSTALL,
+                requireVerifiedSystemIdentity = true,
+                captureDenialLog = false,
+                disableOnUninstallFailure = false,
+                canSubmit = {
+                    canSubmitCalled = true
+                    true
+                },
+            )
+
+            assertFalse(outcome.success)
+            assertEquals(ChangeFailure.SpaceStateUnverified, outcome.failure)
+            assertFalse(canSubmitCalled)
+            assertTrue(executor.executedCommands.isEmpty())
+        }
     }
 
     @Test
@@ -510,5 +669,62 @@ class PackageCommandsTest {
             },
         )
         assertTrue(PackageCommands(restorableExecutor).read(pkg).toLookupResult() is PackageLookupResult.Found)
+
+        // Bare codePath without pkg=, non-system, and all users installed=false cannot prove APK existence.
+        val bareCodePathExecutor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    """
+                    Packages:
+                      Package [$pkg] (abc):
+                        codePath=/data/app/~~stale/$pkg
+                        pkgFlags=[ HAS_CODE ]
+                        User 0: installed=false enabled=0
+                    """.trimIndent(),
+                )
+            },
+        )
+        val bareReading = PackageCommands(bareCodePathExecutor).read(pkg)
+        assertTrue(bareReading is PackageReading.Found)
+        assertEquals(PackageState.NOT_FOUND, (bareReading as PackageReading.Found).record.users[0])
+        assertEquals(PackageLookupResult.Unavailable, bareReading.toLookupResult())
+
+        // Verified system package without pkg= remains Found/RESTORABLE.
+        val systemWithoutPkgLine = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    """
+                    Packages:
+                      Package [$pkg] (abc):
+                        codePath=/system_ext/app/Sample
+                        pkgFlags=[ SYSTEM HAS_CODE ]
+                        User 0: installed=false enabled=0
+                    """.trimIndent(),
+                )
+            },
+        )
+        assertTrue(PackageCommands(systemWithoutPkgLine).read(pkg).toLookupResult() is PackageLookupResult.Found)
+
+        // Non-system package without pkg= but installed in another user remains Found (User 10 RESTORABLE).
+        val installedOtherUser = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    """
+                    Packages:
+                      Package [$pkg] (abc):
+                        codePath=/data/app/~~live/$pkg
+                        pkgFlags=[ HAS_CODE ]
+                        User 0: installed=true enabled=0
+                        User 10: installed=false enabled=0
+                    """.trimIndent(),
+                )
+            },
+        )
+        val multiUserReading = PackageCommands(installedOtherUser).read(pkg) as PackageReading.Found
+        assertEquals(PackageState.RESTORABLE, multiUserReading.record.users[10])
+        assertTrue(multiUserReading.toLookupResult() is PackageLookupResult.Found)
     }
 }

@@ -79,7 +79,12 @@ class AutoCleanupService : Service() {
         }
         if (monitorJob?.isActive == true) {
             if (intent?.action == ACTION_ENABLE) {
-                serviceScope.launch { settings.setAutoCleanupEnabled(true) }
+                serviceScope.launch {
+                    if (!persistAutoCleanupEnable(settings) && !settings.readPreferences().autoCleanupEnabled) {
+                        settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
+                        stopSelf()
+                    }
+                }
             }
             updateNotification(settings.autoCleanupStatus.value)
             return START_STICKY
@@ -104,11 +109,7 @@ class AutoCleanupService : Service() {
 
         val enabling = intent?.action == ACTION_ENABLE
         monitorJob = serviceScope.launch {
-            val enabled = if (enabling) {
-                settings.setAutoCleanupEnabled(true)
-            } else {
-                settings.readPreferences().autoCleanupEnabled
-            }
+            val enabled = resolveAutoCleanupEnablement(settings, enabling)
             if (enabled) {
                 monitor()
             } else {
@@ -301,6 +302,23 @@ class AutoCleanupService : Service() {
                 settings.setAutoCleanupStatus(AutoCleanupStatus.START_FAILED)
                 false
             }
+        }
+
+        /** Persists an explicit foreground enable request and notifies the UI on DataStore failure. */
+        internal suspend fun persistAutoCleanupEnable(settings: CleanerSettings): Boolean {
+            val saved = settings.setAutoCleanupEnabled(true)
+            if (!saved) settings.reportAutoCleanupEnableSaveFailure()
+            return saved
+        }
+
+        /** Resolves whether monitoring should start, reporting save failure only for explicit enable requests. */
+        internal suspend fun resolveAutoCleanupEnablement(
+            settings: CleanerSettings,
+            enabling: Boolean,
+        ): Boolean = if (enabling) {
+            persistAutoCleanupEnable(settings)
+        } else {
+            settings.readPreferences().autoCleanupEnabled
         }
 
         /** Starts the monitor when opted in, or refreshes its notification after permission is granted. */

@@ -119,6 +119,15 @@ data class DetectedPackage(
                 (userId !in targetUserIds && status == PackageState.INSTALLED)
         }
 
+    /** Whether this package has at least one manual action available in [selectedUserIds] in O(spaces). */
+    internal fun hasActionIn(selectedUserIds: Set<Int>): Boolean =
+        selectedUserIds.any { userId ->
+            val state = users[userId]
+            state == PackageState.INSTALLED ||
+                state == PackageState.RESTORABLE ||
+                (state == PackageState.DISABLED && userId in userDisabledIds)
+        }
+
     /** Resolves actionable spaces for this single package without scanning the whole snapshot. */
     internal fun targetsFor(
         action: PackageAction,

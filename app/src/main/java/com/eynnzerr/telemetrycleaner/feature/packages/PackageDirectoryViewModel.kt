@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.eynnzerr.telemetrycleaner.data.CleanerRepository
 import com.eynnzerr.telemetrycleaner.data.CriticalSystemPackages
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
+import com.eynnzerr.telemetrycleaner.data.PackageEntry
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
 import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
 import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** Validation or device-lookup outcome inside the add-custom-package dialog. */
@@ -72,9 +74,21 @@ internal fun validateCustomPackageInput(
 
 /** Owns custom test-package verification, addition, and removal within the component directory. */
 internal class PackageDirectoryViewModel(
-    private val repository: CleanerRepository,
+    private val connectionFlow: StateFlow<PrivilegeConnection>,
+    private val lookupPackage: suspend (String) -> PackageEntry?,
+    private val setCustomPackage: suspend (String, Boolean) -> Boolean,
     settings: CleanerSettings,
 ) : ViewModel() {
+    constructor(
+        repository: CleanerRepository,
+        settings: CleanerSettings,
+    ) : this(
+        connectionFlow = repository.connection,
+        lookupPackage = repository::lookupPackage,
+        setCustomPackage = repository::setCustomPackage,
+        settings = settings,
+    )
+
     private val eventChannel = Channel<PackageDirectoryEvent>(Channel.BUFFERED)
     val events: Flow<PackageDirectoryEvent> = eventChannel.receiveAsFlow()
 
@@ -83,6 +97,7 @@ internal class PackageDirectoryViewModel(
     private val statusFlow = MutableStateFlow<AddCustomPackageStatus>(AddCustomPackageStatus.Idle)
 
     private var verifyJob: Job? = null
+    private var activeRequestId: Long = 0L
 
     private val customPackageNames = settings.preferences
         .map { it.customPackageNames }
@@ -90,7 +105,7 @@ internal class PackageDirectoryViewModel(
 
     val state: StateFlow<PackageDirectoryUiState> = combine(
         customPackageNames,
-        repository.connection,
+        connectionFlow,
         addDialogOpen,
         inputFlow,
         statusFlow,
@@ -105,11 +120,12 @@ internal class PackageDirectoryViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = PackageDirectoryUiState(connection = repository.connection.value),
+        initialValue = PackageDirectoryUiState(connection = connectionFlow.value),
     )
 
     /** Opens a fresh exact-package-name dialog. */
     fun openAddDialog() {
+        activeRequestId += 1
         verifyJob?.cancel()
         verifyJob = null
         inputFlow.value = ""
@@ -119,6 +135,7 @@ internal class PackageDirectoryViewModel(
 
     /** Closes the dialog and cancels any in-flight verification. */
     fun dismissAddDialog() {
+        activeRequestId += 1
         verifyJob?.cancel()
         verifyJob = null
         addDialogOpen.value = false
@@ -127,7 +144,8 @@ internal class PackageDirectoryViewModel(
 
     /** Updates the entered package identifier and clears stale validation errors. */
     fun onInputChange(value: String) {
-        if (verifyJob?.isActive == true) {
+        if (verifyJob != null) {
+            activeRequestId += 1
             verifyJob?.cancel()
             verifyJob = null
         }
@@ -146,27 +164,33 @@ internal class PackageDirectoryViewModel(
             statusFlow.value = localError
             return
         }
-        if (repository.connection.value.status != PrivilegeStatus.READY) {
+        if (connectionFlow.value.status != PrivilegeStatus.READY) {
             statusFlow.value = AddCustomPackageStatus.NeedsConnection
             return
         }
 
+        val requestId = ++activeRequestId
         verifyJob?.cancel()
         statusFlow.value = AddCustomPackageStatus.Verifying
         verifyJob = viewModelScope.launch {
             val found = try {
-                repository.lookupPackage(packageName)
+                lookupPackage(packageName)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                statusFlow.value = AddCustomPackageStatus.LookupFailed
+                if (isActive && activeRequestId == requestId) {
+                    statusFlow.value = AddCustomPackageStatus.LookupFailed
+                }
                 return@launch
             }
+            if (!isActive || activeRequestId != requestId) return@launch
             if (found == null) {
                 statusFlow.value = AddCustomPackageStatus.NotFound(packageName)
                 return@launch
             }
-            if (repository.setCustomPackage(packageName, included = true)) {
+            val saved = setCustomPackage(packageName, true)
+            if (!isActive || activeRequestId != requestId) return@launch
+            if (saved) {
                 addDialogOpen.value = false
                 inputFlow.value = ""
                 statusFlow.value = AddCustomPackageStatus.Idle
@@ -179,7 +203,7 @@ internal class PackageDirectoryViewModel(
     /** Removes a custom package from the directory and notifies on persistence failures. */
     fun removeCustomPackage(packageName: String) {
         viewModelScope.launch {
-            if (!repository.setCustomPackage(packageName, included = false)) {
+            if (!setCustomPackage(packageName, false)) {
                 eventChannel.send(PackageDirectoryEvent.SaveFailed)
             }
         }
