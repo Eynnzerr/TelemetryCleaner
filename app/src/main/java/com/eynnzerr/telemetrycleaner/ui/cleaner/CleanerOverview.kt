@@ -82,23 +82,22 @@ internal data class SummaryStatusKey(
 )
 
 /**
- * Pure state machine deciding when the top floating status capsule should be visible:
- * it stays hidden while the summary card is visible (or merely scrolled away without changes),
- * appears whenever status changes while the summary card is off-screen, and disappears as soon
- * as the summary card returns into view.
+ * Returns whether the top floating status capsule should be shown for the current [CleanerState].
+ *
+ * The capsule appears whenever [SummaryCard] is scrolled off-screen and the cleaner is in an active
+ * or non-nominal state (scanning, changing, disconnected, error, empty scope, or incomplete scan).
+ * It disappears whenever [SummaryCard] is visible, reappears if scrolled away again while still in
+ * that state, and is never shown for the resting "X installed" state.
  */
-internal data class FloatingStatusVisibilityState(
-    val visible: Boolean,
-    val lastSeenStatus: SummaryStatusKey,
-) {
-    fun reduce(
-        currentStatus: SummaryStatusKey,
-        isSummaryVisible: Boolean,
-    ): FloatingStatusVisibilityState = when {
-        isSummaryVisible -> copy(visible = false, lastSeenStatus = currentStatus)
-        currentStatus != lastSeenStatus -> copy(visible = true, lastSeenStatus = currentStatus)
-        else -> this
-    }
+internal fun CleanerState.shouldShowFloatingStatusPill(isSummaryVisible: Boolean): Boolean {
+    if (isSummaryVisible) return false
+    val key = summaryStatusKey()
+    val isNominalInstalledSummary = activity == CleanerActivity.IDLE &&
+        connection.status == PrivilegeStatus.READY &&
+        error == null &&
+        key.installedCount != null &&
+        !(key.installedCount == 0 && key.hasIncompleteResults)
+    return !isNominalInstalledSummary
 }
 
 /** Derives a comparable status fingerprint for [SummaryCard] and [AnimatedFloatingStatusPill]. */
@@ -132,8 +131,7 @@ private enum class SummaryTone { ERROR, DISCONNECTED, ATTENTION, POSITIVE }
 
 private data class SummaryPresentation(
     val summaryTitle: String,
-    val pillPrimaryText: String,
-    val pillSecondaryText: String?,
+    val pillText: String,
     val connectionLabel: String,
     val subtitle: Int?,
     val cardTone: SummaryTone,
@@ -205,22 +203,15 @@ private fun summaryPresentation(state: CleanerState): SummaryPresentation {
         else -> MaterialShapes.Clover4Leaf.toShape()
     }
 
-    val pillPrimaryText = when {
+    val pillText = when {
         !busy && state.error != null -> stringResource(state.error.messageRes())
-        !busy && !ready && (status == PrivilegeStatus.ERROR || status == PrivilegeStatus.PERMISSION_REQUIRED || isRoot) ->
-            connectionLabel
+        !busy && !ready -> connectionLabel
         else -> summaryTitle
-    }
-    val pillSecondaryText = if (!busy && state.error == null && installedCount != null) {
-        connectionLabel
-    } else {
-        null
     }
 
     return SummaryPresentation(
         summaryTitle = summaryTitle,
-        pillPrimaryText = pillPrimaryText,
-        pillSecondaryText = pillSecondaryText,
+        pillText = pillText,
         connectionLabel = connectionLabel,
         subtitle = subtitle,
         cardTone = cardTone,
@@ -520,40 +511,19 @@ private fun FloatingStatusPill(
                 }
             }
             AnimatedContent(
-                targetState = presentation.pillPrimaryText to presentation.pillSecondaryText,
+                targetState = presentation.pillText,
                 transitionSpec = {
                     (fadeIn(motion.fastEffectsSpec()) + slideInVertically(motion.fastSpatialSpec()) { it / 3 }) togetherWith
                         fadeOut(motion.fastEffectsSpec())
                 },
                 label = "pillText",
-            ) { (primary, secondary) ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = primary,
-                        style = MaterialTheme.typography.titleSmallEmphasized,
-                        maxLines = 1,
-                        softWrap = secondary == null,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (secondary != null) {
-                        Text(
-                            text = "·",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = contentColor.copy(alpha = 0.55f),
-                        )
-                        Text(
-                            text = secondary,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = contentColor.copy(alpha = 0.78f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
-                }
+            ) { labelText ->
+                Text(
+                    text = labelText,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

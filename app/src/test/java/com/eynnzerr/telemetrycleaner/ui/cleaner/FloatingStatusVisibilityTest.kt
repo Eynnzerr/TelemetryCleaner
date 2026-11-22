@@ -22,8 +22,10 @@ class FloatingStatusVisibilityTest {
     private val pkgA = PackageEntry("com.example.a", "CompA", setOf(Carrier.UNICOM))
     private val pkgB = PackageEntry("com.example.b", "CompB", setOf(Carrier.TELECOM))
 
-    private fun readyState(
-        installedCount: Int,
+    private fun cleanerState(
+        pkgAState: PackageState = PackageState.INSTALLED,
+        pkgBState: PackageState = PackageState.INSTALLED,
+        selectedUserIds: Set<Int> = setOf(owner.id),
         activity: CleanerActivity = CleanerActivity.IDLE,
         error: CleanerError? = null,
         status: PrivilegeStatus = PrivilegeStatus.READY,
@@ -34,7 +36,7 @@ class FloatingStatusVisibilityTest {
                 versionName = "1.0",
                 versionCode = 1L,
                 systemPath = "/system/app/A/A.apk",
-                users = mapOf(owner.id to if (installedCount >= 1) PackageState.INSTALLED else PackageState.RESTORABLE),
+                users = mapOf(owner.id to pkgAState),
                 userDisabledIds = emptySet(),
                 hasVerifiedSystemIdentity = true,
                 hasSystemCopy = true,
@@ -44,7 +46,7 @@ class FloatingStatusVisibilityTest {
                 versionName = "1.0",
                 versionCode = 1L,
                 systemPath = "/system/app/B/B.apk",
-                users = mapOf(owner.id to if (installedCount >= 2) PackageState.INSTALLED else PackageState.RESTORABLE),
+                users = mapOf(owner.id to pkgBState),
                 userDisabledIds = emptySet(),
                 hasVerifiedSystemIdentity = true,
                 hasSystemCopy = true,
@@ -53,94 +55,58 @@ class FloatingStatusVisibilityTest {
         return CleanerState(
             connection = PrivilegeConnection(PrivilegeBackend.SHIZUKU, status),
             snapshot = ScanSnapshot(owner.id, listOf(owner), packages),
-            selectedUserIds = setOf(owner.id),
+            selectedUserIds = selectedUserIds,
             activity = activity,
             error = error,
         )
     }
 
     @Test
-    fun staysHiddenWhenScrollingDownWithoutStatusChange() {
-        val initial = readyState(installedCount = 2).summaryStatusKey()
-        var state = FloatingStatusVisibilityState(visible = false, lastSeenStatus = initial)
+    fun neverShowsForNominalInstalledCountStates() {
+        val twoInstalled = cleanerState(PackageState.INSTALLED, PackageState.INSTALLED)
+        val zeroInstalled = cleanerState(PackageState.RESTORABLE, PackageState.RESTORABLE)
 
-        state = state.reduce(currentStatus = initial, isSummaryVisible = false)
-
-        assertFalse(state.visible)
+        assertFalse(twoInstalled.shouldShowFloatingStatusPill(isSummaryVisible = false))
+        assertFalse(twoInstalled.shouldShowFloatingStatusPill(isSummaryVisible = true))
+        assertFalse(zeroInstalled.shouldShowFloatingStatusPill(isSummaryVisible = false))
+        assertFalse(zeroInstalled.shouldShowFloatingStatusPill(isSummaryVisible = true))
     }
 
     @Test
-    fun staysHiddenWhenStatusChangesWhileSummaryIsVisible() {
-        val initial = readyState(installedCount = 2).summaryStatusKey()
-        val updated = readyState(installedCount = 1).summaryStatusKey()
-        var state = FloatingStatusVisibilityState(visible = false, lastSeenStatus = initial)
+    fun hidesWhenSummaryVisibleAndReappearsWhenScrolledAwayAgain() {
+        val scanning = cleanerState(activity = CleanerActivity.SCANNING)
+        val changing = cleanerState(activity = CleanerActivity.CHANGING)
+        val disconnected = cleanerState(status = PrivilegeStatus.STOPPED)
 
-        state = state.reduce(currentStatus = updated, isSummaryVisible = true)
-        assertFalse(state.visible)
-
-        // Scrolling down after seeing the updated card should still stay hidden.
-        state = state.reduce(currentStatus = updated, isSummaryVisible = false)
-        assertFalse(state.visible)
+        listOf(scanning, changing, disconnected).forEach { state ->
+            // Scrolled past summary card -> show capsule
+            assertTrue(state.shouldShowFloatingStatusPill(isSummaryVisible = false))
+            // Scroll back to summary card -> hide capsule
+            assertFalse(state.shouldShowFloatingStatusPill(isSummaryVisible = true))
+            // Scroll down again while still in this state -> show capsule again
+            assertTrue(state.shouldShowFloatingStatusPill(isSummaryVisible = false))
+        }
     }
 
     @Test
-    fun appearsOnOffscreenStatusChangeAndDismissesOnceSummaryReturns() {
-        val initial = readyState(installedCount = 2).summaryStatusKey()
-        val changing = readyState(installedCount = 2, activity = CleanerActivity.CHANGING).summaryStatusKey()
-        val afterUninstall = readyState(installedCount = 1).summaryStatusKey()
-        var state = FloatingStatusVisibilityState(visible = false, lastSeenStatus = initial)
+    fun hidesOnceBusyOperationReturnsToNominalInstalledState() {
+        val changing = cleanerState(activity = CleanerActivity.CHANGING)
+        val done = cleanerState(PackageState.RESTORABLE, PackageState.INSTALLED, activity = CleanerActivity.IDLE)
 
-        // Scroll past summary card without status change.
-        state = state.reduce(currentStatus = initial, isSummaryVisible = false)
-        assertFalse(state.visible)
-
-        // Uninstall begins while summary is off-screen -> capsule appears.
-        state = state.reduce(currentStatus = changing, isSummaryVisible = false)
-        assertTrue(state.visible)
-
-        // Uninstall finishes with new installed count -> capsule stays visible with updated state.
-        state = state.reduce(currentStatus = afterUninstall, isSummaryVisible = false)
-        assertTrue(state.visible)
-
-        // Scroll back up so summary card becomes visible -> capsule immediately dismisses.
-        state = state.reduce(currentStatus = afterUninstall, isSummaryVisible = true)
-        assertFalse(state.visible)
-
-        // Scrolling down again without further status change keeps it hidden.
-        state = state.reduce(currentStatus = afterUninstall, isSummaryVisible = false)
-        assertFalse(state.visible)
+        assertTrue(changing.shouldShowFloatingStatusPill(isSummaryVisible = false))
+        assertFalse(done.shouldShowFloatingStatusPill(isSummaryVisible = false))
     }
 
     @Test
-    fun appearsWhenOffscreenRefreshFinishesWithUnchangedCount() {
-        val initial = readyState(installedCount = 2).summaryStatusKey()
-        val scanning = readyState(installedCount = 2, activity = CleanerActivity.SCANNING).summaryStatusKey()
-        var state = FloatingStatusVisibilityState(visible = false, lastSeenStatus = initial)
+    fun showsForErrorEmptyScopeAndIncompleteZeroScanWhenOffscreen() {
+        val error = cleanerState(error = CleanerError.ACTION_FAILED)
+        val noSpaces = cleanerState(selectedUserIds = emptySet())
+        val incompleteZero = cleanerState(PackageState.UNKNOWN, PackageState.RESTORABLE)
+        val connecting = cleanerState(status = PrivilegeStatus.CONNECTING)
 
-        state = state.reduce(currentStatus = initial, isSummaryVisible = false)
-        assertFalse(state.visible)
-
-        state = state.reduce(currentStatus = scanning, isSummaryVisible = false)
-        assertTrue(state.visible)
-
-        state = state.reduce(currentStatus = initial, isSummaryVisible = false)
-        assertTrue(state.visible)
-    }
-
-    @Test
-    fun appearsOnOffscreenDisconnectOrError() {
-        val initial = readyState(installedCount = 2).summaryStatusKey()
-        val disconnected = readyState(installedCount = 2, status = PrivilegeStatus.STOPPED).summaryStatusKey()
-        val failed = readyState(installedCount = 2, error = CleanerError.SCAN_FAILED).summaryStatusKey()
-
-        var state = FloatingStatusVisibilityState(visible = false, lastSeenStatus = initial)
-        state = state.reduce(currentStatus = disconnected, isSummaryVisible = false)
-        assertTrue(state.visible)
-
-        state = state.reduce(currentStatus = disconnected, isSummaryVisible = true)
-        assertFalse(state.visible)
-
-        state = state.reduce(currentStatus = failed, isSummaryVisible = false)
-        assertTrue(state.visible)
+        listOf(error, noSpaces, incompleteZero, connecting).forEach { state ->
+            assertTrue(state.shouldShowFloatingStatusPill(isSummaryVisible = false))
+            assertFalse(state.shouldShowFloatingStatusPill(isSummaryVisible = true))
+        }
     }
 }

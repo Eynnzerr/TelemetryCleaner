@@ -21,13 +21,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -74,13 +71,7 @@ fun CleanerScreen(
             }
         }
     }
-    val statusKey = state.summaryStatusKey()
-    var floatingStatus by remember {
-        mutableStateOf(FloatingStatusVisibilityState(visible = false, lastSeenStatus = statusKey))
-    }
-    LaunchedEffect(statusKey, isSummaryVisible) {
-        floatingStatus = floatingStatus.reduce(statusKey, isSummaryVisible)
-    }
+    val showFloatingStatus = state.shouldShowFloatingStatusPill(isSummaryVisible)
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -230,7 +221,7 @@ fun CleanerScreen(
             }
 
             AnimatedFloatingStatusPill(
-                visible = floatingStatus.visible,
+                visible = showFloatingStatus,
                 state = state,
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 modifier = Modifier.align(Alignment.TopCenter),
