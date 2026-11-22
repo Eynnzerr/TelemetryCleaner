@@ -3,11 +3,17 @@ package com.eynnzerr.telemetrycleaner.feature.settings
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
+import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
-import com.eynnzerr.telemetrycleaner.service.AutoCleanupService
+import com.eynnzerr.telemetrycleaner.service.AutoCleanupStartCoordinator
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -27,15 +33,17 @@ import org.junit.Test
 class SettingsViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
 
-    private class FakePreferencesDataStore(
+    private class ControllablePreferencesDataStore(
         initial: Preferences = emptyPreferences(),
-        var failWrites: Boolean = false,
+        private val onUpdate: suspend (attempt: Int) -> Boolean = { true },
     ) : DataStore<Preferences> {
         private val state = MutableStateFlow(initial)
+        private var updateAttempts = 0
         override val data: Flow<Preferences> = state
 
         override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
-            if (failWrites) throw IOException("Simulated disk write failure")
+            val attempt = ++updateAttempts
+            if (!onUpdate(attempt)) throw IOException("Simulated disk write failure on attempt $attempt")
             val updated = transform(state.value)
             state.value = updated
             return updated
@@ -53,67 +61,216 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun resolveAutoCleanupEnablement_whenEnableSaveFails_emitsSaveFailedToSettingsViewModel() = runTest(testDispatcher) {
-        val store = FakePreferencesDataStore(failWrites = true)
+    fun overlappingEnableRequests_firstSuspendedAndFailsSecondSucceeds_runsSingleMonitorWithNoStaleError() =
+        runTest(testDispatcher) {
+            val firstWriteStarted = CompletableDeferred<Unit>()
+            val releaseFirstWrite = CompletableDeferred<Unit>()
+            val store = ControllablePreferencesDataStore { attempt ->
+                if (attempt == 1) {
+                    firstWriteStarted.complete(Unit)
+                    releaseFirstWrite.await()
+                    false
+                } else {
+                    true
+                }
+            }
+            val settings = CleanerSettings(store, logWarning = { _, _ -> })
+            val viewModel = SettingsViewModel(settings)
+            val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
+
+            var monitorStarts = 0
+            val stoppedStartIds = mutableListOf<Int>()
+            val coordinator = AutoCleanupStartCoordinator(
+                scope = serviceScope,
+                settings = settings,
+                onStartMonitoring = {
+                    monitorStarts += 1
+                    awaitCancellation()
+                },
+                onStopService = { stoppedStartIds += it },
+            )
+
+            try {
+                // 1. Enable A starts writing and suspends.
+                coordinator.onStartRequest(enabling = true, startId = 1)
+                advanceUntilIdle()
+                assertTrue(firstWriteStarted.isCompleted)
+                assertFalse(coordinator.isMonitoring)
+
+                // 2. Enable B arrives while A is still writing.
+                coordinator.onStartRequest(enabling = true, startId = 2)
+                advanceUntilIdle()
+
+                // 3. A fails, then B writes and succeeds.
+                releaseFirstWrite.complete(Unit)
+                advanceUntilIdle()
+
+                assertTrue(settings.readPreferences().autoCleanupEnabled)
+                assertEquals(1, monitorStarts)
+                assertTrue(coordinator.isMonitoring)
+                assertTrue(stoppedStartIds.isEmpty())
+
+                // 4. Activity returns to foreground and begins collecting events: no stale SaveFailed is shown.
+                val collectedEvents = mutableListOf<SettingsEvent>()
+                val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
+                advanceUntilIdle()
+                assertTrue(collectedEvents.isEmpty())
+                collectJob.cancel()
+            } finally {
+                serviceScope.cancel()
+            }
+        }
+
+    @Test
+    fun backgroundEnableFailureSupersededBySuccessBeforeResume_clearsPendingErrorBeforeForegroundCollect() =
+        runTest(testDispatcher) {
+            var shouldFail = true
+            val store = ControllablePreferencesDataStore { !shouldFail }
+            val settings = CleanerSettings(store, logWarning = { _, _ -> })
+            val viewModel = SettingsViewModel(settings)
+            val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
+
+            var monitorStarts = 0
+            val stoppedStartIds = mutableListOf<Int>()
+            val coordinator = AutoCleanupStartCoordinator(
+                scope = serviceScope,
+                settings = settings,
+                onStartMonitoring = {
+                    monitorStarts += 1
+                    awaitCancellation()
+                },
+                onStopService = { stoppedStartIds += it },
+            )
+
+            try {
+                // Activity is backgrounded (not collecting events). A fails completely.
+                coordinator.onStartRequest(enabling = true, startId = 1)
+                advanceUntilIdle()
+                assertEquals(listOf(1), stoppedStartIds)
+                assertEquals(AutoCleanupStatus.OFF, settings.autoCleanupStatus.value)
+                assertTrue(settings.pendingAutoCleanupEnableSaveFailure.value)
+
+                // While still backgrounded, B succeeds.
+                shouldFail = false
+                coordinator.onStartRequest(enabling = true, startId = 2)
+                advanceUntilIdle()
+                assertTrue(settings.readPreferences().autoCleanupEnabled)
+                assertEquals(1, monitorStarts)
+                assertTrue(coordinator.isMonitoring)
+                assertFalse(settings.pendingAutoCleanupEnableSaveFailure.value)
+
+                // Activity returns to foreground: must not see A's superseded SaveFailed toast.
+                val collectedEvents = mutableListOf<SettingsEvent>()
+                val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
+                advanceUntilIdle()
+                assertTrue(collectedEvents.isEmpty())
+                collectJob.cancel()
+            } finally {
+                serviceScope.cancel()
+            }
+        }
+
+    @Test
+    fun singleEnableSaveFailure_surfacesSaveFailedOnceOnForegroundResumeAndStopsWithStartId() =
+        runTest(testDispatcher) {
+            val store = ControllablePreferencesDataStore { false }
+            val settings = CleanerSettings(store, logWarning = { _, _ -> })
+            val viewModel = SettingsViewModel(settings)
+            val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
+
+            val stoppedStartIds = mutableListOf<Int>()
+            val coordinator = AutoCleanupStartCoordinator(
+                scope = serviceScope,
+                settings = settings,
+                onStartMonitoring = { awaitCancellation() },
+                onStopService = { stoppedStartIds += it },
+            )
+
+            try {
+                coordinator.onStartRequest(enabling = true, startId = 7)
+                advanceUntilIdle()
+                assertEquals(listOf(7), stoppedStartIds)
+                assertEquals(AutoCleanupStatus.OFF, settings.autoCleanupStatus.value)
+
+                // Foreground resumes: sees SaveFailed once.
+                val firstResumeEvents = mutableListOf<SettingsEvent>()
+                val firstCollector = launch { viewModel.events.collect(firstResumeEvents::add) }
+                advanceUntilIdle()
+                assertEquals(listOf(SettingsEvent.SaveFailed), firstResumeEvents)
+                firstCollector.cancel()
+
+                // Subsequent foreground resume must not re-deliver the already-shown failure.
+                val secondResumeEvents = mutableListOf<SettingsEvent>()
+                val secondCollector = launch { viewModel.events.collect(secondResumeEvents::add) }
+                advanceUntilIdle()
+                assertTrue(secondResumeEvents.isEmpty())
+                secondCollector.cancel()
+            } finally {
+                serviceScope.cancel()
+            }
+        }
+
+    @Test
+    fun recoveryStartReadingDisabled_stopsQuietlyWithoutSaveFailed() = runTest(testDispatcher) {
+        val store = ControllablePreferencesDataStore { true }
         val settings = CleanerSettings(store, logWarning = { _, _ -> })
         val viewModel = SettingsViewModel(settings)
+        val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
         val collectedEvents = mutableListOf<SettingsEvent>()
         val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
 
-        val enabled = AutoCleanupService.resolveAutoCleanupEnablement(settings, enabling = true)
-        advanceUntilIdle()
+        var monitorStarts = 0
+        val stoppedStartIds = mutableListOf<Int>()
+        val coordinator = AutoCleanupStartCoordinator(
+            scope = serviceScope,
+            settings = settings,
+            onStartMonitoring = {
+                monitorStarts += 1
+                awaitCancellation()
+            },
+            onStopService = { stoppedStartIds += it },
+        )
 
-        assertFalse(enabled)
-        assertEquals(listOf(SettingsEvent.SaveFailed), collectedEvents)
-        collectJob.cancel()
+        try {
+            coordinator.onStartRequest(enabling = false, startId = 3)
+            advanceUntilIdle()
+
+            assertEquals(0, monitorStarts)
+            assertEquals(listOf(3), stoppedStartIds)
+            assertEquals(AutoCleanupStatus.OFF, settings.autoCleanupStatus.value)
+            assertTrue(collectedEvents.isEmpty())
+        } finally {
+            collectJob.cancel()
+            serviceScope.cancel()
+        }
     }
 
     @Test
-    fun persistAutoCleanupEnable_whenActiveMonitorEnableSaveFails_emitsSaveFailedToSettingsViewModel() = runTest(testDispatcher) {
-        val store = FakePreferencesDataStore(failWrites = true)
+    fun consecutiveForegroundEnableFailures_eachEmitSaveFailed() = runTest(testDispatcher) {
+        val store = ControllablePreferencesDataStore { false }
         val settings = CleanerSettings(store, logWarning = { _, _ -> })
         val viewModel = SettingsViewModel(settings)
+        val serviceScope = CoroutineScope(SupervisorJob() + testDispatcher)
         val collectedEvents = mutableListOf<SettingsEvent>()
         val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
 
-        val saved = AutoCleanupService.persistAutoCleanupEnable(settings)
-        advanceUntilIdle()
+        val coordinator = AutoCleanupStartCoordinator(
+            scope = serviceScope,
+            settings = settings,
+            onStartMonitoring = { awaitCancellation() },
+            onStopService = {},
+        )
 
-        assertFalse(saved)
-        assertEquals(listOf(SettingsEvent.SaveFailed), collectedEvents)
-        collectJob.cancel()
-    }
+        try {
+            coordinator.onStartRequest(enabling = true, startId = 1)
+            advanceUntilIdle()
+            coordinator.onStartRequest(enabling = true, startId = 2)
+            advanceUntilIdle()
 
-    @Test
-    fun resolveAutoCleanupEnablement_whenRecoveryReadsDisabled_stopsQuietlyWithoutSaveFailed() = runTest(testDispatcher) {
-        val store = FakePreferencesDataStore(failWrites = false)
-        val settings = CleanerSettings(store, logWarning = { _, _ -> })
-        val viewModel = SettingsViewModel(settings)
-        val collectedEvents = mutableListOf<SettingsEvent>()
-        val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
-
-        val enabled = AutoCleanupService.resolveAutoCleanupEnablement(settings, enabling = false)
-        advanceUntilIdle()
-
-        assertFalse(enabled)
-        assertTrue(collectedEvents.isEmpty())
-        collectJob.cancel()
-    }
-
-    @Test
-    fun resolveAutoCleanupEnablement_whenEnableSaveSucceeds_persistsEnabledWithoutErrors() = runTest(testDispatcher) {
-        val store = FakePreferencesDataStore(failWrites = false)
-        val settings = CleanerSettings(store, logWarning = { _, _ -> })
-        val viewModel = SettingsViewModel(settings)
-        val collectedEvents = mutableListOf<SettingsEvent>()
-        val collectJob = launch { viewModel.events.collect(collectedEvents::add) }
-
-        val enabled = AutoCleanupService.resolveAutoCleanupEnablement(settings, enabling = true)
-        advanceUntilIdle()
-
-        assertTrue(enabled)
-        assertTrue(settings.readPreferences().autoCleanupEnabled)
-        assertTrue(collectedEvents.isEmpty())
-        collectJob.cancel()
+            assertEquals(listOf(SettingsEvent.SaveFailed, SettingsEvent.SaveFailed), collectedEvents)
+        } finally {
+            collectJob.cancel()
+            serviceScope.cancel()
+        }
     }
 }

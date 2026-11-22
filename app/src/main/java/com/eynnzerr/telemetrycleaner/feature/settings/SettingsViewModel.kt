@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -56,18 +58,26 @@ internal class SettingsViewModel(
     private val settings: CleanerSettings,
 ) : ViewModel() {
     private val eventChannel = Channel<SettingsEvent>(Channel.BUFFERED)
-    val events: Flow<SettingsEvent> = eventChannel.receiveAsFlow()
+
+    /**
+     * Emits one-shot settings events to the active foreground collector.
+     *
+     * Background auto-cleanup enable save failures stay in [CleanerSettings.pendingAutoCleanupEnableSaveFailure]
+     * until collected in foreground, so a later successful enable clears any unshown failure before resume.
+     */
+    val events: Flow<SettingsEvent> = merge(
+        eventChannel.receiveAsFlow(),
+        settings.pendingAutoCleanupEnableSaveFailure.mapNotNull { pending ->
+            if (pending && settings.consumeAutoCleanupEnableSaveFailure()) {
+                SettingsEvent.SaveFailed
+            } else {
+                null
+            }
+        },
+    )
 
     private val checkingForUpdate = MutableStateFlow(false)
     private val releaseResult = MutableStateFlow<ReleaseCheckResult?>(null)
-
-    init {
-        viewModelScope.launch {
-            settings.autoCleanupEnableSaveFailureEvents.collect {
-                eventChannel.send(SettingsEvent.SaveFailed)
-            }
-        }
-    }
 
     val state: StateFlow<SettingsUiState> = combine(
         settings.preferences,
