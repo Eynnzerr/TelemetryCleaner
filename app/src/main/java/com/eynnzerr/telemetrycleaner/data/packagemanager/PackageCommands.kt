@@ -92,9 +92,17 @@ internal class PackageCommands(
     suspend fun scan(callerUser: Int, entries: Collection<PackageEntry>, permissionManager: PackageManager?): ScanSnapshot {
         val users = listUsers()
         if (users.none { it.id == callerUser }) throw UserListScanException(PackageScanIssue.USER_STATE_MISSING)
+        val targetNames = entries.mapTo(mutableSetOf(), PackageEntry::packageName)
+        val batchBlocks = if (targetNames.size > 1) {
+            currentCoroutineContext().ensureActive()
+            readBatchPackages(targetNames)
+        } else {
+            null
+        }
         val packages = entries.map { entry ->
             currentCoroutineContext().ensureActive()
-            when (val reading = read(entry.packageName, permissionManager)) {
+            val reading = readForScan(entry.packageName, batchBlocks, permissionManager)
+            when (reading) {
                 is PackageReading.Found -> {
                     val states = reading.record.users + users.associate {
                         it.id to (reading.record.users[it.id] ?: PackageState.UNKNOWN)
@@ -154,21 +162,81 @@ internal class PackageCommands(
         return users
     }
 
-    /** Reads the exact package directly because some ROMs omit it from package lists. */
-    fun read(packageName: String, permissionManager: PackageManager? = null): PackageReading {
-        if (!executor.prefersShellDump) {
-            return readDump(packageName, permissionManager) { executor.dump(packageName) }
+    /**
+     * Resolves one entry during a scan, using the single `dumpsys package p` snapshot to skip
+     * absent packages and falling back to targeted single-package reads only for present packages
+     * that need full permission and shared-user records.
+     */
+    private fun readForScan(
+        packageName: String,
+        batchBlocks: Map<String, List<String>>?,
+        permissionManager: PackageManager?,
+    ): PackageReading {
+        if (batchBlocks == null) {
+            return read(packageName, permissionManager)
         }
-        val direct = readDump(packageName, permissionManager) { executor.execute(listOf("dump", packageName)) }
-        if (direct !is PackageReading.Unavailable) return direct
-        val fallback = readDump(packageName, permissionManager) { executor.dump(packageName) }
-        if (fallback !is PackageReading.Unavailable) return fallback
-        return when {
-            direct.issue == PackageScanIssue.PERMISSION_DENIED -> direct
-            fallback.issue == PackageScanIssue.UNRECOGNIZED_RESPONSE -> direct
-            else -> fallback
+        val block = batchBlocks[packageName] ?: return PackageReading.Missing
+        val batchRecord = parseRecord(block)
+        if (permissionManager == null) {
+            return PackageReading.Found(batchRecord)
+        }
+        val detailed = read(packageName, permissionManager)
+        return if (detailed !is PackageReading.Unavailable) {
+            detailed
+        } else {
+            PackageReading.Found(batchRecord)
         }
     }
+
+    /**
+     * Reads PMS's `Packages:` section once via `dumpsys package p` and extracts only the blocks
+     * belonging to [targetPackages]. Returns null on any error or incomplete output so callers
+     * safely fall back to per-package reads.
+     */
+    private fun readBatchPackages(targetPackages: Set<String>): Map<String, List<String>>? {
+        val result = try {
+            executor.dump("p")
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return null
+        }
+        if (result.queryIssue() != null) return null
+
+        val matched = mutableMapOf<String, MutableList<String>>()
+        var inPackagesSection = false
+        var totalPackages = 0
+        var currentBlock: MutableList<String>? = null
+
+        for (line in result.output.lineSequence()) {
+            if (!inPackagesSection) {
+                if (line.trimEnd() == "Packages:") {
+                    inPackagesSection = true
+                }
+                continue
+            }
+            if (line.isNotBlank() && !line.first().isWhitespace()) {
+                break
+            }
+            val headerMatch = packageHeader.matchEntire(line)
+            if (headerMatch != null) {
+                totalPackages += 1
+                val name = headerMatch.groupValues[1]
+                currentBlock = if (name in targetPackages && name !in matched) {
+                    mutableListOf<String>().also { matched[name] = it }
+                } else {
+                    null
+                }
+            } else {
+                currentBlock?.add(line)
+            }
+        }
+        return matched.takeIf { inPackagesSection && totalPackages > 0 }
+    }
+
+    /** Reads the exact package directly from PMS because some ROMs omit it from package lists. */
+    fun read(packageName: String, permissionManager: PackageManager? = null): PackageReading =
+        readDump(packageName, permissionManager) { executor.dump(packageName) }
 
     /** Converts transport failures to a reason before parsing the package response. */
     private inline fun readDump(

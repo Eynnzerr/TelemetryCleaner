@@ -7,6 +7,8 @@ import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageEntry
 import com.eynnzerr.telemetrycleaner.data.PackageScanIssue
 import com.eynnzerr.telemetrycleaner.data.PackageState
+import java.io.IOException
+import java.io.StringReader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -19,7 +21,6 @@ import org.junit.Test
 
 class PackageCommandsTest {
     private class FakePackageExecutor(
-        override val prefersShellDump: Boolean = false,
         private val onExecute: (List<String>) -> PackageShellResult = { PackageShellResult(0, "") },
         private val onDump: (List<String>) -> PackageShellResult = { PackageShellResult(0, "") },
     ) : PackageExecutor {
@@ -134,11 +135,10 @@ class PackageCommandsTest {
     }
 
     @Test
-    fun read_fallsBackFromShellDumpToBinderDumpWhenPreferredShellDumpFails() {
+    fun read_queriesPmsDumpDirectlyWithoutShellDumpCommand() {
         val pkg = "com.example.app"
         val executor = FakePackageExecutor(
-            prefersShellDump = true,
-            onExecute = { PackageShellResult(1, "Error: dump failed") },
+            onExecute = { error("pm dump shell command must not be called") },
             onDump = {
                 PackageShellResult(
                     0,
@@ -149,8 +149,165 @@ class PackageCommandsTest {
 
         val reading = PackageCommands(executor).read(pkg)
         assertTrue(reading is PackageReading.Found)
-        assertEquals(listOf(listOf("dump", pkg)), executor.executedCommands)
+        assertTrue(executor.executedCommands.isEmpty())
         assertEquals(listOf(listOf(pkg)), executor.dumpArgs)
+    }
+
+    @Test
+    fun scan_usesSingleBatchPackagesDumpAndIgnoresHiddenSystemPackagesSection() = runTest {
+        val presentA = PackageEntry("com.mobiletools.systemhelper", "SystemHelper", emptySet())
+        val presentB = PackageEntry("com.oppo.ctautoregist", "CTAutoRegist", emptySet())
+        val absent = PackageEntry("com.xiaomi.registration", "AutoRegistration", emptySet())
+
+        val batchOutput = """
+            Packages:
+              Package [android] (1111):
+                appId=1000
+                pkg=Package{1111 android}
+                User 0: installed=true enabled=0
+              Package [${presentA.packageName}] (2222):
+                appId=10236
+                pkg=Package{2222 ${presentA.packageName}}
+                codePath=/product/priv-app/SystemHelper
+                versionCode=31 minSdk=31 targetSdk=33
+                versionName=3.0.1
+                pkgFlags=[ SYSTEM HAS_CODE ]
+                User 0: installed=false enabled=0
+                User 10: installed=true enabled=${PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER}
+              Package [${presentB.packageName}] (3333):
+                appId=10229
+                pkg=Package{3333 ${presentB.packageName}}
+                codePath=/product/priv-app/CTAutoRegist
+                versionCode=16000000 minSdk=33 targetSdk=35
+                versionName=16.0.0
+                pkgFlags=[ SYSTEM HAS_CODE ]
+                User 0: installed=true enabled=0
+                User 10: installed=false enabled=0
+
+            Hidden system packages:
+              Package [${absent.packageName}] (4444):
+                appId=10999
+                pkg=Package{4444 ${absent.packageName}}
+                pkgFlags=[ SYSTEM HAS_CODE ]
+                User 0: installed=true enabled=0
+        """.trimIndent()
+
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                if (args == listOf("list", "users")) PackageShellResult(0, usersOutput())
+                else error("Unexpected shell command: $args")
+            },
+            onDump = { args ->
+                assertEquals(listOf("p"), args)
+                PackageShellResult(0, batchOutput)
+            },
+        )
+
+        val snapshot = PackageCommands(executor).scan(
+            callerUser = 0,
+            entries = listOf(presentA, presentB, absent),
+            permissionManager = null,
+        )
+
+        // Single batch PMS dump, zero per-package dumps and zero pm dump shell calls.
+        assertEquals(listOf(listOf("p")), executor.dumpArgs)
+        assertEquals(listOf(listOf("list", "users")), executor.executedCommands)
+
+        val detectedA = snapshot.packages[0]
+        assertEquals("3.0.1", detectedA.versionName)
+        assertEquals(31L, detectedA.versionCode)
+        assertEquals(PackageState.RESTORABLE, detectedA.users[0])
+        assertEquals(PackageState.DISABLED, detectedA.users[10])
+        assertEquals(PackageState.UNKNOWN, detectedA.users[11])
+        assertEquals(setOf(10), detectedA.userDisabledIds)
+
+        val detectedB = snapshot.packages[1]
+        assertEquals("16.0.0", detectedB.versionName)
+        assertEquals(PackageState.INSTALLED, detectedB.users[0])
+        assertEquals(PackageState.RESTORABLE, detectedB.users[10])
+
+        val detectedAbsent = snapshot.packages[2]
+        assertEquals(
+            mapOf(0 to PackageState.NOT_FOUND, 10 to PackageState.NOT_FOUND, 11 to PackageState.NOT_FOUND),
+            detectedAbsent.users,
+        )
+    }
+
+    @Test
+    fun scan_batchDumpWithZeroMatchingTargetsMarksAllEntriesMissing() = runTest {
+        val absentA = PackageEntry("com.xiaomi.registration", "AutoRegistration", emptySet())
+        val absentB = PackageEntry("com.vivo.devicereg", "Device Management", emptySet())
+
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                if (args == listOf("list", "users")) PackageShellResult(0, usersOutput())
+                else error("Unexpected shell command: $args")
+            },
+            onDump = { args ->
+                assertEquals(listOf("p"), args)
+                PackageShellResult(
+                    0,
+                    packageDump("android", userLines = listOf("User 0: installed=true enabled=0")),
+                )
+            },
+        )
+
+        val snapshot = PackageCommands(executor).scan(0, listOf(absentA, absentB), permissionManager = null)
+
+        assertEquals(listOf(listOf("p")), executor.dumpArgs)
+        assertTrue(snapshot.packages.all { pkg -> pkg.users.values.all { it == PackageState.NOT_FOUND } })
+    }
+
+    @Test
+    fun scan_fallsBackToPerPackageDumpWhenBatchDumpIsIncompleteOrThrows() = runTest {
+        val present = PackageEntry("com.oppo.ctautoregist", "CTAutoRegist", emptySet())
+        val absent = PackageEntry("com.example.missing", "Missing", emptySet())
+
+        val brokenBatchResponses: List<() -> PackageShellResult> = listOf(
+            { PackageShellResult(0, "Packages:\n") },
+            { PackageShellResult(0, "Unrecognized header") },
+            { PackageShellResult(-1, "*** SERVICE 'package' DUMP TIMEOUT") },
+            { throw IOException("pipe broken") },
+        )
+
+        for (brokenBatch in brokenBatchResponses) {
+            val executor = FakePackageExecutor(
+                onExecute = { args ->
+                    if (args == listOf("list", "users")) PackageShellResult(0, usersOutput())
+                    else PackageShellResult(1, "")
+                },
+                onDump = { args ->
+                    when (args.singleOrNull()) {
+                        "p" -> brokenBatch()
+                        present.packageName -> PackageShellResult(
+                            0,
+                            packageDump(
+                                present.packageName,
+                                userLines = listOf("User 0: installed=true enabled=0", "User 10: installed=false enabled=0", "User 11: installed=false enabled=0"),
+                            ),
+                        )
+                        absent.packageName -> PackageShellResult(0, "Unable to find package: ${absent.packageName}")
+                        else -> PackageShellResult(1, "")
+                    }
+                },
+            )
+
+            val snapshot = PackageCommands(executor).scan(0, listOf(present, absent), permissionManager = null)
+            assertEquals(listOf(listOf("p"), listOf(present.packageName), listOf(absent.packageName)), executor.dumpArgs)
+            assertEquals(PackageState.INSTALLED, snapshot.packages[0].users[0])
+            assertEquals(PackageState.NOT_FOUND, snapshot.packages[1].users[0])
+        }
+    }
+
+    @Test
+    fun readBounded_readsWithinLimitAndRejectsOversizedOutput() {
+        assertEquals("hello world", PackageBinder.readBounded(StringReader("hello world"), maxChars = 11))
+        try {
+            PackageBinder.readBounded(StringReader("0123456789!"), maxChars = 10)
+            fail("Expected IOException when output exceeds maxChars")
+        } catch (expected: IOException) {
+            assertTrue(expected.message.orEmpty().contains("10"))
+        }
     }
 
     @Test

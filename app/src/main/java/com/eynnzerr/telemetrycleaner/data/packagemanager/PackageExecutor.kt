@@ -5,9 +5,6 @@ internal data class PackageShellResult(val exitCode: Int, val output: String)
 
 /** Executes package manager operations using one privileged connection. */
 internal interface PackageExecutor {
-    /** Whether the package command provides the preferred package dump for this connection. */
-    val prefersShellDump: Boolean get() = false
-
     /** Runs fixed arguments through the package service's shell command interface. */
     fun execute(args: List<String>): PackageShellResult
 
