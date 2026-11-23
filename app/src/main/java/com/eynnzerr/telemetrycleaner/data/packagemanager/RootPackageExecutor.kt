@@ -26,7 +26,7 @@ internal class RootPackageExecutor private constructor(
         runCommand(listOf("/system/bin/cmd", "package") + args)
 
     override fun dump(vararg args: String): PackageShellResult {
-        val result = runCommand(listOf("/system/bin/dumpsys", "-t", "5", "package") + args)
+        val result = runCommand(listOf("/system/bin/dumpsys", "-t", DUMP_TIMEOUT_SECONDS.toString(), "package") + args)
         // dumpsys can write a partial record and still return zero after its own timeout.
         val timeout = result.output.lineSequence().firstOrNull {
             it.startsWith("*** SERVICE 'package' DUMP TIMEOUT")
@@ -82,8 +82,11 @@ internal class RootPackageExecutor private constructor(
         /** Gives the root manager time to respond to an interactive permission check. */
         private const val AUTHORIZATION_TIMEOUT_SECONDS = 30L
 
+        /** Allows OEM package dumps with slow vendor tails to finish before timing out. */
+        private const val DUMP_TIMEOUT_SECONDS = 12L
+
         /** Bounds individual package calls after the shell has been verified. */
-        private const val COMMAND_TIMEOUT_SECONDS = 10L
+        private const val COMMAND_TIMEOUT_SECONDS = 15L
 
         /** Opens a dedicated su shell and verifies UID 0 and package-service access on an I/O thread. */
         fun open(): RootPackageExecutor {

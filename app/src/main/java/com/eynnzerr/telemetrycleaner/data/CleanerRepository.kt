@@ -291,7 +291,7 @@ class CleanerRepository internal constructor(
     private fun userSerialNumber(userId: Int): Long? = try {
         val handle = UserHandle.getUserHandleForUid(userId * PER_USER_RANGE)
         userManager?.getSerialNumberForUser(handle)?.takeIf { it >= 0 }
-    } catch (_: SecurityException) {
+    } catch (_: Exception) {
         null
     }
 
