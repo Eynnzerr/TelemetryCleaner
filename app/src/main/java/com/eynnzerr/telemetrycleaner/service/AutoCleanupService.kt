@@ -18,15 +18,15 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.eynnzerr.telemetrycleaner.MainActivity
 import com.eynnzerr.telemetrycleaner.R
-import com.eynnzerr.telemetrycleaner.data.AutoCleanupCheck
-import com.eynnzerr.telemetrycleaner.data.AutoCleanupCheckStatus
-import com.eynnzerr.telemetrycleaner.data.AutoCleanupHistoryStore
-import com.eynnzerr.telemetrycleaner.data.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.CleanerRepository
-import com.eynnzerr.telemetrycleaner.data.CleanerSettings
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
 import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
-import com.eynnzerr.telemetrycleaner.ui.label
+import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupCheck
+import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupCheckStatus
+import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupHistoryStore
+import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupStatus
+import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
+import com.eynnzerr.telemetrycleaner.data.preferences.label
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +46,103 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.android.ext.android.inject
 
+/**
+ * Serializes overlapping start, enable, and stop commands so only the latest request decides
+ * whether monitoring runs, the service stops, or an enable save failure is reported.
+ */
+internal class AutoCleanupStartCoordinator(
+    private val scope: CoroutineScope,
+    private val settings: CleanerSettings,
+    private val onStartMonitoring: suspend () -> Unit,
+    private val onStopService: (startId: Int) -> Unit,
+) {
+    private var monitorJob: Job? = null
+    private var requestJob: Job? = null
+    private var latestGeneration: Long = 0L
+    private var latestStartId: Int = 0
+
+    val isMonitoring: Boolean
+        get() = monitorJob?.isActive == true
+
+    /** Reconciles monitoring and service lifecycle with the resolved preference for the latest generation. */
+    private fun reconcile(shouldMonitor: Boolean, generation: Long) {
+        if (latestGeneration != generation) return
+        if (shouldMonitor) {
+            if (monitorJob?.isActive != true) {
+                monitorJob = scope.launch { onStartMonitoring() }
+            }
+        } else {
+            monitorJob?.cancel()
+            monitorJob = null
+            settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
+            onStopService(latestStartId)
+        }
+    }
+
+    /** Handles an explicit ACTION_STOP command, superseding any pending start or enable request. */
+    fun onStopRequest(startId: Int) {
+        latestStartId = startId
+        val generation = ++latestGeneration
+        val previous = requestJob
+        requestJob = scope.launch {
+            previous?.join()
+            if (latestGeneration != generation) return@launch
+            val saved = settings.setAutoCleanupEnabled(false)
+            if (latestGeneration != generation) return@launch
+            val shouldMonitor = if (saved) {
+                false
+            } else {
+                val persisted = settings.readPersistedAutoCleanupEnabled()
+                if (latestGeneration != generation) return@launch
+                if (persisted != false) settings.reportAutoCleanupSaveFailure()
+                persisted == true
+            }
+            reconcile(shouldMonitor, generation)
+        }
+    }
+
+    /**
+     * Handles a normal start or explicit ACTION_ENABLE command.
+     * Coalesced refreshes still advance [latestStartId] so subsequent stops match Android's latest delivered startId.
+     */
+    fun onStartRequest(enabling: Boolean, startId: Int) {
+        latestStartId = startId
+        if (!enabling) {
+            if (monitorJob?.isActive == true || requestJob?.isActive == true) {
+                return
+            }
+        }
+        val generation = ++latestGeneration
+        val previous = requestJob
+        requestJob = scope.launch {
+            previous?.join()
+            if (latestGeneration != generation) return@launch
+            val shouldMonitor = if (enabling) {
+                val saved = settings.setAutoCleanupEnabled(true)
+                if (latestGeneration != generation) return@launch
+                if (saved) {
+                    true
+                } else {
+                    val persisted = settings.readPersistedAutoCleanupEnabled()
+                    if (latestGeneration != generation) return@launch
+                    if (persisted != true) settings.reportAutoCleanupSaveFailure()
+                    persisted == true
+                }
+            } else {
+                settings.readPersistedAutoCleanupEnabled() == true
+            }
+            reconcile(shouldMonitor, generation)
+        }
+    }
+
+    /** Stops the service with the latest delivered startId when the monitor observes persisted opt-out. */
+    fun onMonitorObservedDisabled() {
+        if (requestJob?.isActive == true) return
+        settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
+        onStopService(latestStartId)
+    }
+}
+
 /** Periodically removes eligible carrier packages while automatic cleanup is enabled. */
 class AutoCleanupService : Service() {
     /** Provides the saved opt-in, selected spaces, and status for the settings screen. */
@@ -60,8 +157,18 @@ class AutoCleanupService : Service() {
     /** Owns work and notification updates for this service instance. */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    /** Ensures repeated start requests share one monitor. */
-    private var monitorJob: Job? = null
+    /** Tracks whether this service instance has already promoted to foreground. */
+    private var promotedToForeground: Boolean = false
+
+    /** Coordinates overlapping start, enable, and stop commands so one monitor owns execution. */
+    private val coordinator: AutoCleanupStartCoordinator by lazy {
+        AutoCleanupStartCoordinator(
+            scope = serviceScope,
+            settings = settings,
+            onStartMonitoring = ::monitor,
+            onStopService = ::stopSelf,
+        )
+    }
 
     /** The service is controlled by starts and stops from its own app. */
     override fun onBind(intent: Intent?): IBinder? = null
@@ -69,50 +176,43 @@ class AutoCleanupService : Service() {
     /** Promotes the service before accessing the backend and honors the notification stop action. */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            serviceScope.launch {
-                if (settings.setAutoCleanupEnabled(false)) {
-                    settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
-                    stopSelf()
-                }
-            }
+            coordinator.onStopRequest(startId)
             return START_NOT_STICKY
         }
-        if (monitorJob?.isActive == true) {
+        val enabling = intent?.action == ACTION_ENABLE
+        if (!promotedToForeground) {
+            settings.setAutoCleanupStatus(AutoCleanupStatus.STARTING)
+            createNotificationChannel()
+            try {
+                // Android 10–13 have no special-use foreground service type.
+                @Suppress("DEPRECATION")
+                val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
+                }
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(AutoCleanupStatus.STARTING), serviceType)
+                promotedToForeground = true
+            } catch (_: IllegalStateException) {
+                return stopAfterStartFailure()
+            } catch (_: SecurityException) {
+                return stopAfterStartFailure()
+            }
+        } else {
+            if (enabling && settings.autoCleanupStatus.value == AutoCleanupStatus.OFF) {
+                settings.setAutoCleanupStatus(AutoCleanupStatus.STARTING)
+            }
             updateNotification(settings.autoCleanupStatus.value)
-            return START_STICKY
         }
 
-        settings.setAutoCleanupStatus(AutoCleanupStatus.STARTING)
-        createNotificationChannel()
-        try {
-            // Android 10–13 have no special-use foreground service type.
-            @Suppress("DEPRECATION")
-            val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
-            }
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(AutoCleanupStatus.STARTING), serviceType)
-        } catch (_: IllegalStateException) {
-            return stopAfterStartFailure()
-        } catch (_: SecurityException) {
-            return stopAfterStartFailure()
-        }
-
-        monitorJob = serviceScope.launch {
-            if (settings.readPreferences().autoCleanupEnabled) {
-                monitor()
-            } else {
-                settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
-                stopSelf()
-            }
-        }
+        coordinator.onStartRequest(enabling = enabling, startId = startId)
         return START_STICKY
     }
 
     /** Cancels monitoring and clears the foreground notification. */
     override fun onDestroy() {
         serviceScope.cancel()
+        promotedToForeground = false
         if (settings.autoCleanupStatus.value != AutoCleanupStatus.OFF) {
             settings.setAutoCleanupStatus(AutoCleanupStatus.START_FAILED)
         }
@@ -130,8 +230,7 @@ class AutoCleanupService : Service() {
             preferences to connection
         }.collectLatest { (preferences, connection) ->
             if (!preferences.autoCleanupEnabled) {
-                settings.setAutoCleanupStatus(AutoCleanupStatus.OFF)
-                stopSelf()
+                coordinator.onMonitorObservedDisabled()
                 return@collectLatest
             }
             while (currentCoroutineContext().isActive) {
@@ -258,6 +357,9 @@ class AutoCleanupService : Service() {
     }
 
     companion object {
+        /** Identifies a foreground opt-in start that must persist enabled state inside the service. */
+        private const val ACTION_ENABLE = "com.eynnzerr.telemetrycleaner.ENABLE_AUTO_CLEANUP"
+
         /** Identifies the notification's explicit opt-out action. */
         private const val ACTION_STOP = "com.eynnzerr.telemetrycleaner.STOP_AUTO_CLEANUP"
 
@@ -266,6 +368,30 @@ class AutoCleanupService : Service() {
 
         /** Replaces the same notification throughout the service's lifetime. */
         private const val NOTIFICATION_ID = 1
+
+        /**
+         * Immediately starts the foreground service from a foreground user confirmation so leaving
+         * the Activity while preferences persist cannot drop the service startup.
+         */
+        @MainThread
+        internal fun enableAndStart(
+            context: Context,
+            settings: CleanerSettings,
+        ): Boolean {
+            settings.setAutoCleanupStatus(AutoCleanupStatus.STARTING)
+            return try {
+                context.startForegroundService(
+                    Intent(context, AutoCleanupService::class.java).setAction(ACTION_ENABLE),
+                )
+                true
+            } catch (_: IllegalStateException) {
+                settings.setAutoCleanupStatus(AutoCleanupStatus.START_FAILED)
+                false
+            } catch (_: SecurityException) {
+                settings.setAutoCleanupStatus(AutoCleanupStatus.START_FAILED)
+                false
+            }
+        }
 
         /** Starts the monitor when opted in, or refreshes its notification after permission is granted. */
         @MainThread

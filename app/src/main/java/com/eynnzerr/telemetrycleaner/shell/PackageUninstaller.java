@@ -12,7 +12,8 @@ import java.lang.reflect.Method;
  * <p>Telemetry Cleaner starts this class through {@code app_process} when a ROM refuses the
  * package command layer. The shell identity can still call the hidden
  * {@code IPackageManager.deletePackageAsUser} interface directly, which skips checks that ROMs
- * add around {@code pm}. Arguments are the package name and the Android user ID.
+ * add around {@code pm}. Arguments are the package name, the Android user ID, and the expected
+ * 32-bit version code.
  */
 public final class PackageUninstaller {
     private static final int SHELL_UID = 2000;
@@ -28,13 +29,18 @@ public final class PackageUninstaller {
                 System.out.println("SKIP_NOT_SHELL uid=" + Process.myUid());
                 return;
             }
-            if (args.length < 2) {
+            if (args.length < 3) {
                 System.out.println("USAGE: " + PackageUninstaller.class.getName()
-                        + " <package> <userId>");
+                        + " <package> <userId> <versionCode>");
                 return;
             }
             String packageName = args[0];
             int userId = Integer.parseInt(args[1]);
+            int versionCode = Integer.parseInt(args[2]);
+            if (versionCode < 0) {
+                System.out.println("SKIP_INVALID_VERSION " + versionCode);
+                return;
+            }
 
             Object packageManager = Class.forName("android.app.ActivityThread")
                     .getMethod("getPackageManager")
@@ -52,9 +58,9 @@ public final class PackageUninstaller {
                     int.class,
                     int.class);
             try {
-                deletePackageAsUser.invoke(packageManager, packageName, -1, null, userId, flags);
+                deletePackageAsUser.invoke(packageManager, packageName, versionCode, null, userId, flags);
                 System.out.println("DELETE_REQUESTED " + packageName + " user=" + userId
-                        + " flags=" + flags);
+                        + " versionCode=" + versionCode + " flags=" + flags);
             } catch (InvocationTargetException e) {
                 System.out.println("DELETE_FAILED " + e.getCause());
             }

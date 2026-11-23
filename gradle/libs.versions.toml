@@ -13,6 +13,8 @@ shizuku = "13.1.5"
 libsu = "6.0.0"
 activityCompose = "1.8.0"
 kotlin = "2.2.10"
+kotlinxCoroutines = "1.9.0"
+kotlinxSerialization = "1.7.3"
 composeBom = "2026.02.01"
 
 [libraries]
@@ -39,7 +41,10 @@ androidx-navigation3-ui = { group = "androidx.navigation3", name = "navigation3-
 shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
 shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 libsu-core = { group = "com.github.topjohnwu.libsu", name = "core", version.ref = "libsu" }
+kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-core", version.ref = "kotlinxSerialization" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

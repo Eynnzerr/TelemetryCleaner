@@ -3,7 +3,7 @@ package com.eynnzerr.telemetrycleaner.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.eynnzerr.telemetrycleaner.data.CleanerSettings
+import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

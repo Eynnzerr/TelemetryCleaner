@@ -1,0 +1,167 @@
+package com.eynnzerr.telemetrycleaner.feature.cleaner
+
+import com.eynnzerr.telemetrycleaner.data.AndroidUser
+import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
+import com.eynnzerr.telemetrycleaner.data.ChangeTarget
+import com.eynnzerr.telemetrycleaner.data.DetectedPackage
+import com.eynnzerr.telemetrycleaner.data.PackageAction
+import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
+import com.eynnzerr.telemetrycleaner.data.PrivilegeConnection
+import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
+import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
+
+/** Work in progress on the cleaner screen. */
+enum class CleanerActivity { IDLE, SWITCHING_BACKEND, SCANNING, CHANGING }
+
+/** A screen-level failure that can be described with localized UI copy. */
+enum class CleanerError {
+    SCAN_FAILED,
+    SCAN_SPACE_QUERY_FAILED,
+    SCAN_SPACE_PERMISSION_DENIED,
+    SCAN_SPACE_RESPONSE_INVALID,
+    SCAN_CURRENT_SPACE_MISSING,
+    ACTION_FAILED,
+    BACKEND_SELECTION_FAILED,
+}
+
+/** One-shot events emitted by [CleanerViewModel] for transient UI feedback. */
+internal sealed interface CleanerUiEvent {
+    /** Saving a custom directory removal failed. */
+    data object SaveFailed : CleanerUiEvent
+}
+
+/** The currently presented sheet and the data needed to render it. */
+sealed interface CleanerPanel {
+    /** Shows the evidence and installation status for [packageName]. */
+    data class Details(val packageName: String) : CleanerPanel
+
+    /** Captures the exact [targets] for a pending [action]. */
+    data class Confirmation(
+        val action: PackageAction,
+        val targets: List<ChangeTarget>,
+    ) : CleanerPanel
+
+    /** Shows independently verified [outcomes] for the requested [action]. */
+    data class Results(
+        val action: PackageAction,
+        val outcomes: List<ChangeOutcome>,
+    ) : CleanerPanel
+}
+
+/**
+ * Immutable screen state produced by the cleaner reducer.
+ *
+ * @property connection The selected privilege backend and its authorization status.
+ * @property snapshot Last observed package states. In-flight changes invalidate affected states.
+ * @property selectedUserIds User spaces included in the next operation.
+ * @property selectedPackageNames Packages checked for batch operations.
+ * @property activity Work currently in progress.
+ * @property panel Active sheet, if any.
+ * @property error Last screen-level failure, if any.
+ * @property workId Associates scan and operation responses with the request that started them.
+ */
+data class CleanerState(
+    val connection: PrivilegeConnection = PrivilegeConnection(PrivilegeBackend.SHIZUKU, PrivilegeStatus.CONNECTING),
+    val snapshot: ScanSnapshot? = null,
+    val selectedUserIds: Set<Int> = emptySet(),
+    val selectedPackageNames: Set<String> = emptySet(),
+    val activity: CleanerActivity = CleanerActivity.IDLE,
+    val panel: CleanerPanel? = null,
+    val error: CleanerError? = null,
+    internal val workId: Long = 0,
+) {
+    /** Whether the current snapshot can be used to offer package operations. */
+    val readyForActions: Boolean
+        get() = connection.status == PrivilegeStatus.READY &&
+            activity == CleanerActivity.IDLE &&
+            snapshot != null &&
+            error == null
+
+    /**
+     * Returns the eligible packages and spaces for [action]. A [packageName] selects a single
+     * package. Without one, the selection on the main screen determines the packages.
+     */
+    fun targetsFor(action: PackageAction, packageName: String? = null): List<ChangeTarget> {
+        if (!readyForActions) return emptyList()
+        val packageNames = if (packageName == null) selectedPackageNames else setOf(packageName)
+        return snapshot?.targetsFor(
+            action,
+            selectedUserIds,
+            packageNames,
+            requireVerifiedSystemIdentity = false,
+            includeDisabledForUninstall = false,
+        ).orEmpty()
+    }
+
+    /** Returns the eligible spaces for one already-resolved [detected] package in O(spaces). */
+    fun targetsFor(action: PackageAction, detected: DetectedPackage): List<ChangeTarget> {
+        if (!readyForActions) return emptyList()
+        val snap = snapshot ?: return emptyList()
+        return detected.targetsFor(
+            action = action,
+            selectedUserIds = selectedUserIds,
+            usersById = snap.users.associateBy(AndroidUser::id),
+            currentUserId = snap.currentUserId,
+            requireVerifiedSystemIdentity = false,
+            includeDisabledForUninstall = false,
+        )
+    }
+
+    /** Whether [detected] can be selected for a batch action in any chosen space in O(spaces). */
+    fun canSelectPackage(detected: DetectedPackage): Boolean =
+        readyForActions && detected.hasActionIn(selectedUserIds)
+
+    /** Whether [packageName] can be selected for a batch action in any chosen space. */
+    fun canSelectPackage(packageName: String): Boolean {
+        if (!readyForActions) return false
+        val detected = snapshot?.packages?.firstOrNull { it.entry.packageName == packageName } ?: return false
+        return detected.hasActionIn(selectedUserIds)
+    }
+
+    /** Returns the packages with an available action in the selected spaces in a single O(packages * spaces) pass. */
+    fun selectablePackageNames(): Set<String> {
+        if (!readyForActions) return emptySet()
+        return snapshot?.packages.orEmpty()
+            .filter { it.hasActionIn(selectedUserIds) }
+            .mapTo(mutableSetOf()) { it.entry.packageName }
+    }
+}
+
+/** User interactions accepted by the cleaner store. */
+sealed interface CleanerIntent {
+    /** Rechecks the selected backend and starts a fresh scan when connected. */
+    data object Refresh : CleanerIntent
+
+    /** Requests authorization from the selected backend. */
+    data object RequestPermission : CleanerIntent
+
+    /** Saves [backend] as the source of privileged access. */
+    data class SelectBackend(val backend: PrivilegeBackend) : CleanerIntent
+
+    /** Toggles the inclusion of the space identified by [userId]. */
+    data class ToggleSpace(val userId: Int) : CleanerIntent
+
+    /** Toggles [packageName] in the batch selection. */
+    data class TogglePackage(val packageName: String) : CleanerIntent
+
+    /** Selects every eligible package, or clears the selection if all are checked. */
+    data object ToggleAllPackages : CleanerIntent
+
+    /** Opens the details of [packageName]. */
+    data class OpenDetails(val packageName: String) : CleanerIntent
+
+    /** Previews [action] for [packageName], or the checked packages when it is null. */
+    data class RequestAction(
+        val action: PackageAction,
+        val packageName: String? = null,
+    ) : CleanerIntent
+
+    /** Selects disable-only mode for the targets in the open uninstall confirmation. */
+    data class SetFreezeOnly(val enabled: Boolean) : CleanerIntent
+
+    /** Submits the targets shown in the confirmation sheet. */
+    data object ConfirmAction : CleanerIntent
+
+    /** Closes the current sheet. */
+    data object DismissPanel : CleanerIntent
+}

@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="freeze_only">仅冻结</string>
+    <string name="freeze_title">冻结组件</string>
+    <string name="freeze_description">在下列空间中冻结所选组件，保留应用数据。</string>
+    <string name="freeze_action">冻结</string>
     <string name="app_name">遥测组件清理</string>
     <string name="carrier_unicom">中国联通</string>
     <string name="carrier_telecom">中国电信</string>
@@ -19,7 +23,7 @@
         <item quantity="other">%1$d 分钟</item>
     </plurals>
     <string name="settings_history_description">查看最近检查和卸载结果</string>
-    <string name="settings_directory_description">查看支持的厂商和组件</string>
+    <string name="settings_directory_description">查看内置清单及管理自定义测试包</string>
     <string name="settings_version">版本</string>
     <string name="settings_version_description">%1$s · 检查更新</string>
     <string name="settings_version_checking">正在检查 GitHub Release…</string>
@@ -171,7 +175,11 @@
     <plurals name="selected_components">
         <item quantity="other">已选择 %d 个组件</item>
     </plurals>
+    <plurals name="selected_components_short">
+        <item quantity="other">已选 %d 项</item>
+    </plurals>
     <string name="details_title">组件详情</string>
+    <string name="details_load_failed">无法读取 %1$s 的详情。</string>
     <string name="details_overview_tab">概览</string>
     <string name="details_permissions_tab">权限</string>
     <string name="details_permissions_explanation">授权申请状态来自 Android 包管理器。</string>
@@ -195,10 +203,12 @@
     <string name="confirm_uninstall">卸载组件</string>
     <string name="confirm_restore">恢复组件</string>
     <string name="uninstall_description">将卸载所选空间中的组件并清除组件数据。</string>
-    <string name="uninstall_untested_warning">作者暂未对%1$s组件做卸载测试，不保证卸载后行为。请谨慎评估再决定是否卸载。</string>
+    <string name="confirm_uninstall_last_apk_warning">卸载后无法恢复（将移除设备上最后一份 APK）</string>
     <string name="restore_description">已停用的组件将重新启用，已卸载的组件将用设备上保留的 APK 恢复。</string>
     <string name="cancel">取消</string>
     <string name="done">完成</string>
+    <string name="close">关闭</string>
+    <string name="copy_package_name">复制包名</string>
     <string name="operation_results">操作结果</string>
     <string name="copy_uninstall_denial_logs">复制卸载拒绝日志</string>
     <string name="uninstall_denial_feedback_hint">卸载被系统拒绝，可点下方图标复制日志并反馈。</string>
@@ -207,5 +217,37 @@
     <string name="disabled_instead_result">未卸载，已停用</string>
     <string name="restored_result">恢复成功</string>
     <string name="unverified_result">未能确认请求的变更</string>
+    <string name="change_error_not_managed">该组件不在管理清单中。</string>
+    <string name="change_error_protected_system_package">这是受保护的系统核心组件或提权依赖，禁止卸载或冻结。</string>
+    <string name="change_error_shizuku_disconnected">Shizuku 已断开。</string>
+    <string name="change_error_space_operation_denied">系统拒绝了对该空间的操作。</string>
+    <string name="change_error_state_unverified">无法确认组件状态。请刷新后重试。</string>
+    <string name="change_error_identity_unverified">无法确认组件身份。请刷新后重试。</string>
+    <string name="change_error_system_identity_not_verified">该包的系统身份未通过核验。</string>
+    <string name="change_error_space_state_unverified">无法确认该空间的组件状态。</string>
+    <string name="change_error_disabled_by_system">系统停用了该组件，无法重新启用。</string>
+    <string name="change_error_not_enabled_in_space">该空间的组件未处于启用状态。</string>
+    <string name="change_error_no_restorable_copy">设备上没有可用于恢复的组件副本。</string>
+    <string name="change_error_post_change_state_unverified">无法确认操作后的状态。请刷新后再试。</string>
+    <string name="change_error_operation_denied">系统拒绝了此操作。</string>
+    <string name="change_error_state_unchanged">系统返回后，组件状态仍未改变。</string>
     <string name="main_space">主空间</string>
+    <string name="custom_package_add_action">添加自定义包名</string>
+    <string name="custom_package_add_title">添加自定义测试包</string>
+    <string name="custom_package_add_warning">仅用于测试尚未收录的厂商或运营商组件。请勿卸载不熟悉的系统核心包，否则可能导致系统异常。</string>
+    <string name="custom_package_input_label">完整包名</string>
+    <string name="custom_package_input_placeholder">例如 com.vendor.regservice</string>
+    <string name="custom_package_verifying">正在核验设备上的包…</string>
+    <string name="custom_package_invalid_format">请输入有效的完整包名（如 com.vendor.regservice）。</string>
+    <string name="custom_package_critical_protected">此包承担系统核心功能或用于提权恢复，禁止添加为测试包。</string>
+    <string name="custom_package_already_bundled">该包已在内置组件清单中。</string>
+    <string name="custom_package_already_added">该包已在自定义列表中。</string>
+    <string name="custom_package_needs_connection">请先在主页连接 Shizuku 或 Root 以核验该包是否存在。</string>
+    <string name="custom_package_not_found">此设备上未找到 %1$s。</string>
+    <string name="custom_package_lookup_failed">未能核实这个包名，请检查连接后重试。</string>
+    <string name="custom_package_add_confirm">核验并添加</string>
+    <string name="section_custom_packages">自定义测试组件</string>
+    <string name="package_type_system">系统应用</string>
+    <string name="package_type_user">用户应用</string>
+    <string name="remove_from_directory">从清单移除</string>
 </resources>

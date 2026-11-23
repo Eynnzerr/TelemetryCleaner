@@ -20,10 +20,10 @@ data class PrivilegeConnection(val backend: PrivilegeBackend, val status: Privil
 enum class Carrier { UNICOM, TELECOM, MOBILE }
 
 /**
- * An exact, documented package identity in the bundled directory.
+ * A bundled or user-selected package identity in the cleaner's directory.
  *
  * @property packageName The Android package name used for exact lookup.
- * @property displayName The known name of the component.
+ * @property displayName The known component name or the device's application label when available.
  * @property carriers The associated carriers, if known and applicable.
  */
 data class PackageEntry(
@@ -31,6 +31,12 @@ data class PackageEntry(
     val displayName: String,
     val carriers: Set<Carrier>,
 )
+
+/** Matches Android package identifiers with at least two dot-separated segments. */
+private val qualifiedPackageName = Regex("""[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+""")
+
+/** Whether [name] can be passed as an exact package target to the package service. */
+internal fun isExactPackageName(name: String): Boolean = name == "android" || qualifiedPackageName.matches(name)
 
 /**
  * A user or profile visible to Android's package manager.
@@ -96,7 +102,61 @@ data class DetectedPackage(
     val permissions: List<ComponentPermission>? = null,
     val scanIssues: Map<Int, PackageScanIssue> = emptyMap(),
     val userDisabledIds: Set<Int> = emptySet(),
-)
+) {
+    /** Identifies components with enough package data to display an interactive row. */
+    fun hasVisibleRecord(): Boolean = systemPath != null || users.values.any {
+        it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
+    }
+
+    /**
+     * Whether uninstalling this package in [targetUserIds] removes the last APK copy on the device
+     * (applies to non-system apps with no surviving copy in any other or disabled space).
+     */
+    fun losesApkOnUninstall(targetUserIds: Set<Int>): Boolean =
+        hasSystemCopy == false && users.none { (userId, status) ->
+            status == PackageState.UNKNOWN ||
+                status == PackageState.DISABLED ||
+                (userId !in targetUserIds && status == PackageState.INSTALLED)
+        }
+
+    /** Whether this package has at least one manual action available in [selectedUserIds] in O(spaces). */
+    internal fun hasActionIn(selectedUserIds: Set<Int>): Boolean =
+        selectedUserIds.any { userId ->
+            val state = users[userId]
+            state == PackageState.INSTALLED ||
+                state == PackageState.RESTORABLE ||
+                (state == PackageState.DISABLED && userId in userDisabledIds)
+        }
+
+    /** Resolves actionable spaces for this single package without scanning the whole snapshot. */
+    internal fun targetsFor(
+        action: PackageAction,
+        selectedUserIds: Set<Int>,
+        usersById: Map<Int, AndroidUser> = emptyMap(),
+        currentUserId: Int? = null,
+        requireVerifiedSystemIdentity: Boolean = true,
+        includeDisabledForUninstall: Boolean = false,
+    ): List<ChangeTarget> {
+        if (requireVerifiedSystemIdentity && !hasVerifiedSystemIdentity) return emptyList()
+        return selectedUserIds.filter { userId ->
+            val state = users[userId]
+            when (action) {
+                PackageAction.UNINSTALL -> state.permits(action) &&
+                    (includeDisabledForUninstall || state != PackageState.DISABLED)
+                PackageAction.DISABLE -> state.permits(action)
+                PackageAction.RESTORE -> state.permits(action) ||
+                    (state == PackageState.DISABLED && userId in userDisabledIds)
+            }
+        }.map { userId ->
+            val serial = if (currentUserId == null || userId != currentUserId) {
+                usersById[userId]?.serialNumber
+            } else {
+                null
+            }
+            ChangeTarget(entry.packageName, userId, serial)
+        }
+    }
+}
 
 /**
  * A fresh scan scoped to the calling application's user and any visible profiles.
@@ -116,30 +176,31 @@ data class ScanSnapshot(
         selectedUserIds: Set<Int>,
         packageNames: Set<String>? = null,
         requireVerifiedSystemIdentity: Boolean = true,
-        includeDisabledForUninstall: Boolean = true,
-    ): List<ChangeTarget> = packages
-        .filter { packageNames == null || it.entry.packageName in packageNames }
-        .filter { !requireVerifiedSystemIdentity || it.hasVerifiedSystemIdentity }
-        .flatMap { detected ->
-            selectedUserIds.filter { userId ->
-                val state = detected.users[userId]
-                when (action) {
-                    PackageAction.UNINSTALL -> state.permits(action) &&
-                        (includeDisabledForUninstall || state != PackageState.DISABLED)
-                    PackageAction.RESTORE -> state.permits(action) ||
-                        (state == PackageState.DISABLED && userId in detected.userDisabledIds)
-                }
+        includeDisabledForUninstall: Boolean = false,
+    ): List<ChangeTarget> {
+        val usersById = users.associateBy(AndroidUser::id)
+        return packages
+            .filter { packageNames == null || it.entry.packageName in packageNames }
+            .flatMap { detected ->
+                detected.targetsFor(
+                    action = action,
+                    selectedUserIds = selectedUserIds,
+                    usersById = usersById,
+                    currentUserId = currentUserId,
+                    requireVerifiedSystemIdentity = requireVerifiedSystemIdentity,
+                    includeDisabledForUninstall = includeDisabledForUninstall,
+                )
             }
-                .map { userId -> ChangeTarget(detected.entry.packageName, userId) }
-        }
+    }
 }
 
 /** The supported per-user mutations. */
-enum class PackageAction { UNINSTALL, RESTORE }
+enum class PackageAction { UNINSTALL, DISABLE, RESTORE }
 
 /** Whether this observed package state is a valid starting point for the action. */
 internal fun PackageState?.permits(action: PackageAction): Boolean = when (action) {
     PackageAction.UNINSTALL -> this == PackageState.INSTALLED || this == PackageState.DISABLED
+    PackageAction.DISABLE -> this == PackageState.INSTALLED
     PackageAction.RESTORE -> this == PackageState.RESTORABLE
 }
 
@@ -148,22 +209,75 @@ internal fun PackageState?.permits(action: PackageAction): Boolean = when (actio
  *
  * @property packageName The exact package name selected from the directory.
  * @property userId The explicit Android user ID to change.
+ * @property userSerialNumber The profile serial captured during scan to prevent recycled-user mismatches.
  */
-data class ChangeTarget(val packageName: String, val userId: Int)
+data class ChangeTarget(
+    val packageName: String,
+    val userId: Int,
+    val userSerialNumber: Long? = null,
+)
+
+/** Structured reason why a requested package change failed or could not be confirmed. */
+sealed interface ChangeFailure {
+    /** The requested package is no longer in the bundled or custom directory. */
+    data object NotManaged : ChangeFailure
+
+    /** The requested package is a protected core system or recovery package. */
+    data object ProtectedSystemPackage : ChangeFailure
+
+    /** Shizuku disconnected before the operation could be submitted. */
+    data object ShizukuDisconnected : ChangeFailure
+
+    /** Android rejected the operation for the requested user space. */
+    data object SpaceOperationDenied : ChangeFailure
+
+    /** Package state could not be read reliably; user should refresh and retry. */
+    data object StateUnverified : ChangeFailure
+
+    /** Package record could not be confirmed before mutating it. */
+    data object IdentityUnverified : ChangeFailure
+
+    /** Automatic cleanup refused to touch a package without verified system identity. */
+    data object SystemIdentityNotVerified : ChangeFailure
+
+    /** Target user space state could not be confirmed in the package dump. */
+    data object SpaceStateUnverified : ChangeFailure
+
+    /** The package was disabled by the system rather than the user and cannot be re-enabled. */
+    data object DisabledBySystem : ChangeFailure
+
+    /** Disable was requested for a package that is not currently enabled in this space. */
+    data object NotEnabledInSpace : ChangeFailure
+
+    /** Restore was requested when no restorable APK copy exists on the device. */
+    data object NoRestorableCopy : ChangeFailure
+
+    /** Post-operation package state could not be confirmed. */
+    data object PostChangeStateUnverified : ChangeFailure
+
+    /** The package service returned a non-zero exit code without a recognized error line. */
+    data object OperationDenied : ChangeFailure
+
+    /** The command returned without an error, but the package state did not change. */
+    data object StateUnchanged : ChangeFailure
+
+    /** Raw error text returned directly by Android's package service. */
+    data class SystemError(val detail: String) : ChangeFailure
+}
 
 /**
  * The verified result of attempting one mutation.
  *
  * @property target The exact package and user requested by the caller.
  * @property success Whether Android reports the requested resulting state.
- * @property message The reason an operation failed or could not be confirmed.
+ * @property failure The structured reason an operation failed or could not be confirmed.
  * @property denialLog Diagnostics from a manual uninstall rejected by the package service.
  * @property disabledInstead Whether the fallback left the package installed and explicitly disabled.
  */
 data class ChangeOutcome(
     val target: ChangeTarget,
     val success: Boolean,
-    val message: String?,
+    val failure: ChangeFailure? = null,
     val denialLog: String? = null,
     val disabledInstead: Boolean = false,
 )

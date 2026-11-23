@@ -6,3 +6,10 @@
 -keep class rikka.shizuku.Shizuku {
     private static rikka.shizuku.ShizukuRemoteProcess newProcess(java.lang.String[], java.lang.String[], java.lang.String);
 }
+
+# Navigation 3 NavKeySerializer resolves @Serializable route classes reflectively by name.
+-keepnames class * implements androidx.navigation3.runtime.NavKey
+-keepclassmembers class * implements androidx.navigation3.runtime.NavKey {
+    public *** serializer();
+    public static final *** INSTANCE;
+}

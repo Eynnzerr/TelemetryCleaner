@@ -8,12 +8,18 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-/** Adds a compact display style for status summaries alongside the Material type scale. */
+/** Expressive type hierarchy tuned for bold hero metrics and scannable CJK + Latin copy. */
 internal val Typography = Typography(
+    displaySmallEmphasized = TextStyle(
+        fontWeight = FontWeight.Bold,
+        fontSize = 40.sp,
+        lineHeight = 44.sp,
+        letterSpacing = (-1.0).sp,
+    ),
     headlineLargeEmphasized = TextStyle(
         fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-        lineHeight = 38.sp,
+        fontSize = 30.sp,
+        lineHeight = 36.sp,
         letterSpacing = (-0.5).sp,
     ),
 )
