@@ -11,6 +11,11 @@
 - 修复的问题说明
 -->
 
+## [v1.5.1] - 2026-11-24
+
+1. 修复 Android 12–15 设备在批量扫描阶段因 AOSP `PackageManagerService` 输出顶格 `overlay paths:` 行导致解析提前截断、组件检出为 0 的问题（[#46](https://github.com/Eynnzerr/TelemetryCleaner/issues/46)）；
+2. 同步修复单包详情与权限解析在 Android 12–15 顶格 `overlay paths:` 及 `Suspend params:` 场景下截断多空间或运行时权限状态的问题，并在批量扫描零命中时增加系统框架包完整性校验与逐包回退兜底。
+
 ## [v1.5] - 2026-11-23
 
 1. 全面翻新应用界面与交互动效，优化主页、设置页和组件详情页的浏览与批量操作体验；

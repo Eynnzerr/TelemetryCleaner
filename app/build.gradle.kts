@@ -34,8 +34,8 @@ android {
         applicationId = "com.eynnzerr.telemetrycleaner"
         minSdk = 29
         targetSdk = 37
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 8
+        versionName = "1.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
