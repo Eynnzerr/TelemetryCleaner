@@ -300,6 +300,226 @@ class PackageCommandsTest {
     }
 
     @Test
+    fun scan_batchDumpContinuesPastUnindentedSharedLibraryOverlayPathsOnAndroid12To15() = runTest {
+        val presentA = PackageEntry("com.xiaomi.registration", "AutoRegistration", emptySet())
+        val presentB = PackageEntry("com.miui.analytics", "Analytics", emptySet())
+        val hiddenOnly = PackageEntry("com.miui.dmregservice", "RegService", emptySet())
+
+        // Exact AOSP Android 12-15 Settings.dumpPackageLPr() formatting:
+        // pw.print(prefix); pw.println("    "); pw.print(key); pw.println(" overlay paths:");
+        val batchOutput = listOf(
+            "Packages:",
+            "  Package [android] (1111):",
+            "    appId=1000",
+            "    pkg=Package{1111 android}",
+            "    User 0: installed=true enabled=0",
+            "      ",
+            "com.miui.rom overlay paths:",
+            "          /product/overlay/MiuiFrameworkResOverlay.apk",
+            "        ",
+            "com.miui.system legacy overlay paths:",
+            "        /product/overlay/MiuiSystemOverlay.apk",
+            "    User 10: installed=true enabled=0",
+            "  Package [com.example.harmful] (1234):",
+            "    appId=10100",
+            "    pkg=Package{1234 com.example.harmful}",
+            "    User 0: installed=true enabled=0",
+            "      harmfulAppWarning: First line",
+            "Second unindented line from multiline warning",
+            "  Package [${presentA.packageName}] (2222):",
+            "    appId=10201",
+            "    pkg=Package{2222 ${presentA.packageName}}",
+            "    codePath=/system_ext/priv-app/AutoRegistration",
+            "    versionCode=14 minSdk=31 targetSdk=34",
+            "    versionName=1.4.0",
+            "    pkgFlags=[ SYSTEM HAS_CODE ]",
+            "    User 0: installed=true enabled=0",
+            "      ",
+            "com.miui.rom overlay paths:",
+            "          /product/overlay/AutoRegOverlay.apk",
+            "    User 10: installed=false enabled=0",
+            "    User 11: installed=true enabled=${PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER}",
+            "  Package [${presentB.packageName}] (3333):",
+            "    appId=10202",
+            "    pkg=Package{3333 ${presentB.packageName}}",
+            "    codePath=/product/priv-app/AnalyticsCore",
+            "    versionCode=20260101 minSdk=29 targetSdk=34",
+            "    versionName=3.1.0",
+            "    pkgFlags=[ SYSTEM HAS_CODE ]",
+            "    User 0: installed=true enabled=0",
+            "    User 10: installed=true enabled=0",
+            "    User 11: installed=false enabled=0",
+            "",
+            "Renamed packages:",
+            "  com.old.pkg,com.new.pkg",
+            "",
+            "Hidden system packages:",
+            "  Package [${hiddenOnly.packageName}] (4444):",
+            "    appId=10999",
+            "    pkg=Package{4444 ${hiddenOnly.packageName}}",
+            "    pkgFlags=[ SYSTEM HAS_CODE ]",
+            "    User 0: installed=true enabled=0",
+        ).joinToString("\n")
+
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                if (args == listOf("list", "users")) PackageShellResult(0, usersOutput())
+                else error("Unexpected shell command: $args")
+            },
+            onDump = { args ->
+                assertEquals(listOf("p"), args)
+                PackageShellResult(0, batchOutput)
+            },
+        )
+
+        val snapshot = PackageCommands(executor).scan(
+            callerUser = 0,
+            entries = listOf(presentA, presentB, hiddenOnly),
+            permissionManager = null,
+        )
+
+        assertEquals(listOf(listOf("p")), executor.dumpArgs)
+
+        val detectedA = snapshot.packages[0]
+        assertEquals("1.4.0", detectedA.versionName)
+        assertEquals(14L, detectedA.versionCode)
+        assertEquals(PackageState.INSTALLED, detectedA.users[0])
+        assertEquals(PackageState.RESTORABLE, detectedA.users[10])
+        assertEquals(PackageState.DISABLED, detectedA.users[11])
+        assertEquals(setOf(11), detectedA.userDisabledIds)
+
+        val detectedB = snapshot.packages[1]
+        assertEquals(PackageState.INSTALLED, detectedB.users[0])
+        assertEquals(PackageState.INSTALLED, detectedB.users[10])
+        assertEquals(PackageState.RESTORABLE, detectedB.users[11])
+
+        val detectedHiddenOnly = snapshot.packages[2]
+        assertEquals(
+            mapOf(0 to PackageState.NOT_FOUND, 10 to PackageState.NOT_FOUND, 11 to PackageState.NOT_FOUND),
+            detectedHiddenOnly.users,
+        )
+    }
+
+    @Test
+    fun scan_fallsBackWhenBatchDumpHasZeroMatchesAndNoFrameworkPackage() = runTest {
+        val present = PackageEntry("com.xiaomi.registration", "AutoRegistration", emptySet())
+        val absent = PackageEntry("com.example.missing", "Missing", emptySet())
+
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                if (args == listOf("list", "users")) PackageShellResult(0, usersOutput())
+                else PackageShellResult(1, "")
+            },
+            onDump = { args ->
+                when (args.singleOrNull()) {
+                    "p" -> PackageShellResult(
+                        0,
+                        packageDump("com.example.unrelated", userLines = listOf("User 0: installed=true enabled=0")),
+                    )
+                    present.packageName -> PackageShellResult(
+                        0,
+                        packageDump(
+                            present.packageName,
+                            userLines = listOf("User 0: installed=true enabled=0", "User 10: installed=false enabled=0", "User 11: installed=false enabled=0"),
+                        ),
+                    )
+                    absent.packageName -> PackageShellResult(0, "Unable to find package: ${absent.packageName}")
+                    else -> PackageShellResult(1, "")
+                }
+            },
+        )
+
+        val snapshot = PackageCommands(executor).scan(0, listOf(present, absent), permissionManager = null)
+        assertEquals(listOf(listOf("p"), listOf(present.packageName), listOf(absent.packageName)), executor.dumpArgs)
+        assertEquals(PackageState.INSTALLED, snapshot.packages[0].users[0])
+        assertEquals(PackageState.NOT_FOUND, snapshot.packages[1].users[0])
+    }
+
+    @Test
+    fun read_singlePackageDumpPreservesUsersPastUnindentedOverlayPathsAndStopsAtSharedUsers() {
+        val pkg = "com.miui.analytics"
+        val singleDump = listOf(
+            "Packages:",
+            "  Package [$pkg] (deadbeef):",
+            "    appId=10234",
+            "    sharedUser=SharedUserSetting{aaaa com.miui.analytics.uid/10234}",
+            "    pkg=Package{deadbeef $pkg}",
+            "    codePath=/product/priv-app/AnalyticsCore",
+            "    versionCode=100 minSdk=29 targetSdk=34",
+            "    versionName=3.1.0",
+            "    pkgFlags=[ SYSTEM HAS_CODE ]",
+            "    User 0: ceDataInode=1 installed=true hidden=false enabled=0",
+            "      ",
+            "com.miui.rom overlay paths:",
+            "          /product/overlay/MiuiFrameworkResOverlay.apk",
+            "        ",
+            "com.miui.system legacy overlay paths:",
+            "        /product/overlay/MiuiSystemOverlay.apk",
+            "      runtime permissions:",
+            "        android.permission.READ_PHONE_STATE: granted=true, flags=[ USER_SET ]",
+            "    User 999: ceDataInode=2 installed=true hidden=false enabled=0",
+            "",
+            "Hidden system packages:",
+            "  Package [$pkg] (cafebabe):",
+            "    appId=10234",
+            "    pkg=Package{cafebabe $pkg}",
+            "    pkgFlags=[ SYSTEM HAS_CODE ]",
+            "    User 0: installed=false enabled=0",
+            "",
+            "Shared users:",
+            "  SharedUser [com.miui.analytics.uid] (aaaa):",
+            "    appId=10234",
+            "    User 0: ",
+            "      runtime permissions:",
+            "        android.permission.READ_PHONE_STATE: granted=true",
+        ).joinToString("\n")
+
+        val executor = FakePackageExecutor(onDump = { PackageShellResult(0, singleDump) })
+        val reading = PackageCommands(executor).read(pkg)
+        assertTrue(reading is PackageReading.Found)
+        val record = (reading as PackageReading.Found).record
+        // User 0 must remain INSTALLED (not overwritten by Shared users' "User 0: "),
+        // and User 999 must not be truncated by the column-0 overlay paths lines.
+        assertEquals(PackageState.INSTALLED, record.users[0])
+        assertEquals(PackageState.INSTALLED, record.users[999])
+    }
+
+    @Test
+    fun userGrants_preservesRuntimePermissionsPastUnindentedOverlayPathsAndSuspendParams() {
+        val packageBlock = listOf(
+            "    appId=10234",
+            "    User 0: ceDataInode=1 installed=true hidden=false suspended=true enabled=0",
+            "      installReason=0",
+            "    Suspend params:",
+            "      suspendingPackage=com.android.shell",
+            "      ",
+            "com.miui.rom overlay paths:",
+            "          /product/overlay/MiuiFrameworkResOverlay.apk",
+            "        ",
+            "com.miui.system legacy overlay paths:",
+            "        /product/overlay/MiuiSystemOverlay.apk",
+            "      runtime permissions:",
+            "        android.permission.READ_PHONE_STATE: granted=true, flags=[ USER_SET ]",
+            "        android.permission.ACCESS_FINE_LOCATION: granted=false",
+            "    User 999: ceDataInode=2 installed=true hidden=false enabled=0",
+            "      runtime permissions:",
+            "        android.permission.READ_PHONE_STATE: granted=false",
+        )
+
+        assertEquals(
+            mapOf(
+                "android.permission.READ_PHONE_STATE" to true,
+                "android.permission.ACCESS_FINE_LOCATION" to false,
+            ),
+            packageBlock.userGrants(0),
+        )
+        assertEquals(
+            mapOf("android.permission.READ_PHONE_STATE" to false),
+            packageBlock.userGrants(999),
+        )
+    }
+
+    @Test
     fun readBounded_readsWithinLimitAndRejectsOversizedOutput() {
         assertEquals("hello world", PackageBinder.readBounded(StringReader("hello world"), maxChars = 11))
         try {

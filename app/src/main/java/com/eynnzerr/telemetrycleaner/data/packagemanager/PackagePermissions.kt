@@ -18,6 +18,9 @@ private val installUserSuffix = Regex(""", userId=\d+$""")
 /** Identifies the shared permission state referenced by a package. */
 private val sharedUserField = Regex("""sharedUser=SharedUserSetting\{\S+ ([^\s/]+)/\d+\}""")
 
+/** Matches the start of any per-user record inside a package or shared-user block. */
+private val userSectionHeader = Regex("""^ {4}User \d+:.*""")
+
 /** Resolves declarations and explicit grant records from the active package-manager record. */
 internal fun readComponentPermissions(
     packageName: String,
@@ -94,10 +97,23 @@ private fun List<String>.installGrants(userId: Int): Map<String, Boolean> {
 }
 
 /** Reads grants nested under the matching Android user, including per-user install records if present. */
-private fun List<String>.userGrants(userId: Int): Map<String, Boolean> {
-    val user = section { it.startsWith("    User $userId:") }.orEmpty()
+internal fun List<String>.userGrants(userId: Int): Map<String, Boolean> {
+    val user = userSection(userId)
     return user.section { it.trimEnd() == "      install permissions:" }.orEmpty().parseGrants() +
         user.section { it.trimEnd() == "      runtime permissions:" }.orEmpty().parseGrants()
+}
+
+/**
+ * Extracts lines belonging to `User [userId]:` up to the next sibling `User <id>:` header.
+ *
+ * AOSP Android 12-15 prints `<lib> overlay paths:` at column 0 and `Suspend params:` at indent 4
+ * before `runtime permissions:`, so indent-only slicing would drop subsequent user grants.
+ */
+private fun List<String>.userSection(userId: Int): List<String> {
+    val prefix = "    User $userId:"
+    val start = indexOfFirst { it.startsWith(prefix) }
+    if (start < 0) return emptyList()
+    return drop(start + 1).takeWhile { !userSectionHeader.matches(it) }
 }
 
 /** Parses only explicit granted values from one permission block. */

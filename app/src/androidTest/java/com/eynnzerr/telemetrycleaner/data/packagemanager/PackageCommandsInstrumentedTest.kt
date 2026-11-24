@@ -230,4 +230,97 @@ class PackageCommandsInstrumentedTest {
         assertEquals(PackageState.NOT_FOUND, absentDetected.users[0])
         assertEquals(PackageState.NOT_FOUND, absentDetected.users[10])
     }
+
+    @Test
+    fun scan_enrichesRuntimePermissionsPastAndroid12To15UnindentedOverlayPaths() = runBlocking {
+        val packageManager = InstrumentationRegistry.getInstrumentation().targetContext.packageManager
+        val target = PackageEntry("com.miui.analytics", "Analytics", emptySet())
+        val absent = PackageEntry("com.example.missing", "Missing", emptySet())
+
+        val executor = object : PackageExecutor {
+            override fun execute(args: List<String>): PackageShellResult = when (args) {
+                listOf("list", "users") -> PackageShellResult(
+                    0,
+                    """
+                    Users:
+                      UserInfo{0:Owner:4c13} running
+                      UserInfo{999:XSpace:20000410}
+                    """.trimIndent(),
+                )
+                else -> error("Unexpected shell command: $args")
+            }
+
+            override fun dump(vararg args: String): PackageShellResult = when (args.singleOrNull()) {
+                "p" -> PackageShellResult(
+                    0,
+                    listOf(
+                        "Packages:",
+                        "  Package [android] (1111):",
+                        "    appId=1000",
+                        "    pkg=Package{1111 android}",
+                        "    User 0: installed=true enabled=0",
+                        "      ",
+                        "com.miui.rom overlay paths:",
+                        "          /product/overlay/MiuiFrameworkResOverlay.apk",
+                        "  Package [${target.packageName}] (2222):",
+                        "    appId=10234",
+                        "    pkg=Package{2222 ${target.packageName}}",
+                        "    codePath=/product/priv-app/AnalyticsCore",
+                        "    versionCode=100 minSdk=29 targetSdk=34",
+                        "    versionName=3.1.0",
+                        "    pkgFlags=[ SYSTEM HAS_CODE ]",
+                        "    User 0: installed=true enabled=0",
+                        "    User 999: installed=true enabled=0",
+                    ).joinToString("\n"),
+                )
+                target.packageName -> PackageShellResult(
+                    0,
+                    listOf(
+                        "Packages:",
+                        "  Package [${target.packageName}] (2222):",
+                        "    appId=10234",
+                        "    pkg=Package{2222 ${target.packageName}}",
+                        "    codePath=/product/priv-app/AnalyticsCore",
+                        "    versionCode=100 minSdk=29 targetSdk=34",
+                        "    versionName=3.1.0",
+                        "    pkgFlags=[ SYSTEM HAS_CODE ]",
+                        "    requested permissions:",
+                        "      android.permission.INTERNET",
+                        "      android.permission.READ_PHONE_STATE",
+                        "    install permissions:",
+                        "      android.permission.INTERNET: granted=true",
+                        "    User 0: installed=true enabled=0",
+                        "      ",
+                        "com.miui.rom overlay paths:",
+                        "          /product/overlay/MiuiFrameworkResOverlay.apk",
+                        "      runtime permissions:",
+                        "        android.permission.READ_PHONE_STATE: granted=true",
+                        "    User 999: installed=true enabled=0",
+                        "      runtime permissions:",
+                        "        android.permission.READ_PHONE_STATE: granted=false",
+                    ).joinToString("\n"),
+                )
+                else -> error("Absent package must not be queried individually: ${args.toList()}")
+            }
+        }
+
+        val snapshot = PackageCommands(executor).scan(
+            callerUser = 0,
+            entries = listOf(target, absent),
+            permissionManager = packageManager,
+        )
+
+        val detected = snapshot.packages[0]
+        assertEquals(PackageState.INSTALLED, detected.users[0])
+        assertEquals(PackageState.INSTALLED, detected.users[999])
+        val permissions = detected.permissions
+        assertNotNull(permissions)
+        val byName = permissions!!.associateBy { it.name }
+        assertEquals(mapOf(0 to true, 999 to true), byName.getValue("android.permission.INTERNET").grants)
+        assertEquals(mapOf(0 to true, 999 to false), byName.getValue("android.permission.READ_PHONE_STATE").grants)
+
+        val missing = snapshot.packages[1]
+        assertEquals(PackageState.NOT_FOUND, missing.users[0])
+        assertEquals(PackageState.NOT_FOUND, missing.users[999])
+    }
 }

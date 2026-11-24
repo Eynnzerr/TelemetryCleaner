@@ -206,6 +206,7 @@ internal class PackageCommands(
         val matched = mutableMapOf<String, MutableList<String>>()
         var inPackagesSection = false
         var totalPackages = 0
+        var seenSystemFramework = false
         var currentBlock: MutableList<String>? = null
 
         for (line in result.output.lineSequence()) {
@@ -215,13 +216,16 @@ internal class PackageCommands(
                 }
                 continue
             }
-            if (line.isNotBlank() && !line.first().isWhitespace()) {
+            if (isPostPackagesSectionHeader(line)) {
                 break
             }
             val headerMatch = packageHeader.matchEntire(line)
             if (headerMatch != null) {
                 totalPackages += 1
                 val name = headerMatch.groupValues[1]
+                if (name == SYSTEM_FRAMEWORK_PACKAGE) {
+                    seenSystemFramework = true
+                }
                 currentBlock = if (name in targetPackages && name !in matched) {
                     mutableListOf<String>().also { matched[name] = it }
                 } else {
@@ -231,7 +235,7 @@ internal class PackageCommands(
                 currentBlock?.add(line)
             }
         }
-        return matched.takeIf { inPackagesSection && totalPackages > 0 }
+        return matched.takeIf { inPackagesSection && totalPackages > 0 && (matched.isNotEmpty() || seenSystemFramework) }
     }
 
     /** Reads the exact package directly from PMS because some ROMs omit it from package lists. */
@@ -543,7 +547,7 @@ internal class PackageCommands(
         val section = lines.indexOfFirst { it.trimEnd() == "Packages:" }
         if (section >= 0) {
             val packages = lines.drop(section + 1)
-                .takeWhile { it.isBlank() || it.first().isWhitespace() }
+                .takeWhile { !isPostPackagesSectionHeader(it) }
             val start = packages.indexOfFirst { packageHeader.matchEntire(it)?.groupValues?.get(1) == packageName }
             if (start >= 0) {
                 if (issue != null) return PackageReading.Unavailable(issue)
@@ -620,13 +624,82 @@ internal class PackageCommands(
         )
     }
 
+    /**
+     * Recognizes top-level PMS dump section boundaries that terminate `Packages:`.
+     *
+     * Avoids breaking on arbitrary column-0 lines because AOSP Android 12-15 omits indentation
+     * before `<lib> overlay paths:` and `<lib> legacy overlay paths:` inside `User <id>:` blocks
+     * (fixed in Android 16), and multiline fields or OEM lines can also start at column 0.
+     */
+    private fun isPostPackagesSectionHeader(line: String): Boolean {
+        if (line.isBlank() || line.first().isWhitespace()) return false
+        val heading = line.trimEnd()
+        return heading in postPackagesSectionHeaders ||
+            postPackagesSectionPrefixes.any { heading.startsWith(it) }
+    }
+
     private companion object {
+        const val SYSTEM_FRAMEWORK_PACKAGE = "android"
+
         val packageHeader = Regex("""^ {2}Package \[([^\]]+)](?: \([^)]*\))?:.*$""")
         val userHeader = Regex("""^\s+User (\d+):\s+(.*)$""")
         val listedUser = Regex("""^\s*UserInfo\{(\d+):(.*):[a-fA-F0-9]+\}.*$""")
         val installedFlag = Regex("""\binstalled=(true|false)\b""")
         val enabledFlag = Regex("""\benabled=(\d+)\b""")
         val versionCode = Regex("""^versionCode=(\d+)\b""")
+
+        val postPackagesSectionHeaders = setOf(
+            "Renamed packages:",
+            "Hidden system packages:",
+            "Queries:",
+            "Shared users:",
+            "Package Changes:",
+            "Frozen packages:",
+            "Loaded volumes:",
+            "Service permissions:",
+            "Dexopt state:",
+            "BgDexopt state:",
+            "Compiler stats:",
+            "Messages:",
+            "Package warning messages:",
+            "Active install sessions:",
+            "Historical install sessions:",
+            "Install sessions:",
+            "Active staged sessions:",
+            "Active APEX packages:",
+            "Inactive APEX packages:",
+            "Factory APEX packages:",
+            "APEX session state:",
+            "APEX packages:",
+            "Per UID read timeouts:",
+            "Snapshot statistics:",
+            "Protected broadcast actions:",
+            "Database versions:",
+            "Known Packages:",
+            "Verifiers:",
+            "Domain Verifier:",
+            "Features:",
+            "Libraries:",
+            "Shared libraries:",
+            "Permissions:",
+            "Registered ContentProviders:",
+            "ContentProvider Authorities:",
+            "Key Set Manager:",
+            "Domain verification status:",
+            "Activity Resolver Table:",
+            "Receiver Resolver Table:",
+            "Service Resolver Table:",
+            "Provider Resolver Table:",
+        )
+
+        val postPackagesSectionPrefixes = listOf(
+            "DUMP OF SERVICE ",
+            "--------",
+            "Preferred Activities",
+            "Active APEX ",
+            "Inactive APEX ",
+            "Factory APEX ",
+        )
 
         /** Total time allowed for an app_process deletion to appear in the package dump. */
         const val RETRY_VERIFY_TIMEOUT_MS = 3_000L
