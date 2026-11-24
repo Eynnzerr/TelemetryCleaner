@@ -1,5 +1,8 @@
 *.iml
 .gradle
+/.android
+/.kotlin
+/.signing
 /local.properties
 /keystore.properties
 *.jks

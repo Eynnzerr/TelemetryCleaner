@@ -121,6 +121,50 @@ class CleanerModelsTest {
     }
 
     @Test
+    fun suspendedPackagesAreVisibleAndRestorableButNotDefaultUninstallTargets() {
+        val pkg = PackageEntry("com.android.browser", "Browser", emptySet())
+        val snapshot = ScanSnapshot(
+            currentUserId = 0,
+            users = listOf(AndroidUser(0, "Owner", serialNumber = 0L)),
+            packages = listOf(
+                DetectedPackage(
+                    entry = pkg,
+                    versionName = "1.0",
+                    versionCode = 1L,
+                    systemPath = "/product/app/Browser",
+                    users = mapOf(0 to PackageState.SUSPENDED),
+                    hasVerifiedSystemIdentity = true,
+                ),
+            ),
+        )
+
+        assertTrue(snapshot.packages.single().hasVisibleRecord())
+        assertTrue(snapshot.packages.single().hasActionIn(setOf(0)))
+        assertTrue(
+            snapshot.targetsFor(
+                action = PackageAction.UNINSTALL,
+                selectedUserIds = setOf(0),
+                requireVerifiedSystemIdentity = false,
+            ).isEmpty(),
+        )
+        assertTrue(
+            snapshot.targetsFor(
+                action = PackageAction.DISABLE,
+                selectedUserIds = setOf(0),
+                requireVerifiedSystemIdentity = false,
+            ).isEmpty(),
+        )
+        assertEquals(
+            listOf(ChangeTarget(pkg.packageName, 0)),
+            snapshot.targetsFor(
+                action = PackageAction.RESTORE,
+                selectedUserIds = setOf(0),
+                requireVerifiedSystemIdentity = false,
+            ),
+        )
+    }
+
+    @Test
     fun targetsFor_bindsUserSerialNumberForNonCurrentProfiles() {
         val owner = AndroidUser(0, "Owner", serialNumber = 0L)
         val clone = AndroidUser(10, "system_clone", serialNumber = 99L)

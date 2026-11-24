@@ -2,7 +2,7 @@
 
 > 运营商为终端入网、自注册、网络运维和故障排查，确有在相应场景收集必要数据的实际需求！本项目仅供学习，用于了解 Android 系统包管理机制。
 
-TelemetryCleaner 可以检测国行 Android 固件预置的运营商组件，查看各空间的安装状态和权限，并管理卸载与恢复。下载： [GitHub Releases](https://github.com/Eynnzerr/TelemetryCleaner/releases/latest)
+TelemetryCleaner 可以检测国行 Android 固件预置的运营商组件、厂商遥测组件与内置浏览器，查看各空间的安装状态和权限，并管理卸载、冻结与恢复。下载： [GitHub Releases](https://github.com/Eynnzerr/TelemetryCleaner/releases/latest)
 
 <p>
   <img src="docs/screenshots/home.png" alt="主页展示 Shizuku 连接状态和运营商组件" width="235">
@@ -64,11 +64,70 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 
 各厂商社区实测机型与已知问题整理见 [机型实测与使用反馈](docs/user-feedback.md)。欢迎在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 反馈某厂商某模块卸载后使用正常，也欢迎补充组件。附上机型、系统版本、包名和实际结果，便于复核。
 
+## 厂商遥测组件（可选）
+
+以下组件为厂商自有的统计、诊断或体验计划，默认不参与自动清理。表内均标「未验证」，卸载或冻结前请按机型自行确认。
+
+| 厂商 | 包名 | 组件 | 验证 |
+| --- | --- | --- | --- |
+| OPPO / 一加 / realme | `com.oplus.statistics.rom` | User Experience Program | 未验证 |
+| OPPO / 一加 / realme | `com.nearme.statistics.rom` | User Experience Program（旧版） | 未验证 |
+| OPPO / 一加 / realme | `com.nearme.deamon` | 统计组件后台守护 | 未验证 |
+| OPPO / 一加 / realme | `com.oplus.locationproxy` | Carrier Location Services | 未验证 |
+| 小米 / Redmi / POCO | `com.miui.spock` | Spock Analytics | 未验证 |
+| 小米 / Redmi / POCO | `android.romstats` | ROM Stats | 未验证 |
+| 小米 / Redmi / POCO | `com.xiaomi.aon` | AON Service | 未验证 |
+| 小米 / Redmi / POCO | `com.xiaomi.touchservice` | Touch Service | 未验证 |
+| 小米 / Redmi / POCO | `com.xiaomi.location.fused` | Fused Location | 未验证 |
+| 华为 | `com.huawei.bd` | HwUE | 未验证 |
+| 华为 | `com.huawei.hiview` | HiView | 未验证 |
+| 华为 | `com.huawei.hwdiagnosis` | HwDiagnosis | 未验证 |
+| 荣耀 | `com.hihonor.detectrepair` | Smart Diagnosis | 未验证 |
+| 魅族 / Flyme | `com.flyme.telecom.usagedata.service` | Telecom Usage Data | 未验证 |
+| 努比亚 / 红魔 | `cn.nubia.woodpecker` | Woodpecker | 未验证 |
+| 三星 | `com.samsung.android.rubin.app` | Customization Service | 未验证 |
+| 三星 | `com.samsung.android.knox.analytics.uploader` | Knox Analytics Uploader | 未验证 |
+| 三星 | `com.samsung.android.svcagent` | SVC Agent | 未验证 |
+| 三星 | `com.samsung.carrier.logcollector` | Carrier Log Collector | 未验证 |
+| Moto / 联想 | `com.motorola.regservice` | RegService（运营商 DM） | 未验证 |
+| Moto / 联想 | `com.motorola.ctdm.SmsAutoRegistrationService` | 电信短信自注册 | 未验证 |
+| Moto / 联想 | `com.motorola.iqimotmetrics` | IQI Metrics | 未验证 |
+| 中兴 | `com.zte.zdmdaemon` | ZDM Daemon | 未验证 |
+| 中兴 | `com.zte.zdmdaemon.install` | ZDM Daemon Installer | 未验证 |
+
+## 内置浏览器（可冻结）
+
+这些是各厂商预装浏览器，仅用于检出和冻结，不建议直接卸载；自动清理不会处理它们。部分 ROM 会拒绝 shell 停用系统包（返回 `Cannot disable system packages`），此时可改用 `pm suspend --user <id> <包名>` 暂停，恢复用 `pm unsuspend`。
+
+| 厂商 | 包名 | 浏览器 | 验证 |
+| --- | --- | --- | --- |
+| 小米 / Redmi / POCO | `com.android.browser` | Mi Browser | 本机暂停实测 |
+| OPPO / 一加 / realme | `com.heytap.browser` | HeyTap Browser | 未验证 |
+| OPPO / 一加 / realme | `com.nearme.browser` | NearMe Browser（旧版） | 未验证 |
+| vivo | `com.vivo.browser` | vivo Browser | 未验证 |
+| 华为 | `com.huawei.browser` | Huawei Browser | 未验证 |
+| 荣耀 | `com.hihonor.browser` | Honor Browser | 待实机确认 |
+| 三星 | `com.sec.android.app.sbrowser` | Samsung Internet | 未验证 |
+| 努比亚 / 红魔 | `cn.nubia.browser` | Nubia Browser | 未验证 |
+| 魅族 / Flyme | `com.meizu.flyme.browser` | Flyme Browser | 待实机确认 |
+| Moto / 联想 | `com.motorola.browser` | Moto Browser | 待实机确认 |
+| 中兴 | `com.zte.browser` | ZTE Browser | 待实机确认 |
+
 ## WIP
 
 - [ ] 努比亚、国行三星、魅族运营商遥测组件包名收集
 - [ ] 扩充更多组件检测（包括厂商自己的敏感数据收集组件）作为可选项
 - [x] 部分 vivo 系不支持卸载 SystemHelper 外的组件。暂提供冻结策略作为兜底
+- [x] 补充各厂商内置浏览器包名，并验证冻结/暂停路径
+
+## 发布
+
+1. 在 `app/build.gradle.kts` 提升 `versionCode` / `versionName`，并在 `CHANGELOG.md` 添加同名版本章节；
+2. 提交并推送代码；
+3. 推送与 `versionName` 一致的 tag，例如 `git tag v1.5.2 && git push origin v1.5.2`；
+4. GitHub Actions 会自动构建签名 APK，上传构建产物，并创建对应 Release。
+
+签名密钥通过仓库 Secrets 提供：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。
 
 <a href="https://www.star-history.com/?repos=Eynnzerr%2FTelemetryCleaner&amp;type=date">
   <picture>

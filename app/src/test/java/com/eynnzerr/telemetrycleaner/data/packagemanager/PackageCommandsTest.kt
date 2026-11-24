@@ -1104,4 +1104,107 @@ class PackageCommandsTest {
         assertEquals(PackageState.RESTORABLE, multiUserReading.record.users[10])
         assertTrue(multiUserReading.toLookupResult() is PackageLookupResult.Found)
     }
+
+    @Test
+    fun read_marksSuspendedPackageAsSuspended() {
+        val pkg = "com.android.browser"
+        val executor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(pkg, userLines = listOf("User 0: installed=true suspended=true enabled=0")),
+                )
+            },
+        )
+
+        val record = (PackageCommands(executor).read(pkg) as PackageReading.Found).record
+        assertEquals(PackageState.SUSPENDED, record.users[0])
+        assertEquals(true, record.suspendedSettings[0])
+    }
+
+    @Test
+    fun change_disableFallsBackToSuspendWhenSystemPackagesCannotBeDisabled() = runTest {
+        val pkg = "com.android.browser"
+        val target = ChangeTarget(pkg, 0)
+        var suspended = false
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                when (args.firstOrNull()) {
+                    "disable-user" -> PackageShellResult(
+                        1,
+                        "java.lang.SecurityException: Cannot disable system packages.",
+                    )
+                    "suspend" -> {
+                        suspended = true
+                        PackageShellResult(0, "Package $pkg new suspended state: true")
+                    }
+                    else -> PackageShellResult(1, "")
+                }
+            },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        userLines = listOf("User 0: installed=true suspended=$suspended enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.DISABLE,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            disableOnUninstallFailure = false,
+        )
+
+        assertTrue(outcome.success)
+        assertTrue(outcome.suspendedInstead)
+        assertNull(outcome.failure)
+        assertEquals(
+            listOf(listOf("suspend", "--user", "0", pkg)),
+            executor.executedCommands.filter { it.firstOrNull() == "suspend" },
+        )
+    }
+
+    @Test
+    fun change_restoreUnsuspendsSuspendedPackage() = runTest {
+        val pkg = "com.android.browser"
+        val target = ChangeTarget(pkg, 0)
+        var suspended = true
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                when (args.firstOrNull()) {
+                    "unsuspend" -> {
+                        suspended = false
+                        PackageShellResult(0, "Package $pkg new suspended state: false")
+                    }
+                    else -> PackageShellResult(1, "")
+                }
+            },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        userLines = listOf("User 0: installed=true suspended=$suspended enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.RESTORE,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            disableOnUninstallFailure = false,
+        )
+
+        assertTrue(outcome.success)
+        assertFalse(outcome.suspendedInstead)
+        assertEquals(listOf(listOf("unsuspend", "--user", "0", pkg)), executor.executedCommands)
+    }
 }

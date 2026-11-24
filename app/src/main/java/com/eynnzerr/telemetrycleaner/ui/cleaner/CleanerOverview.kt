@@ -110,7 +110,8 @@ internal fun CleanerState.summaryStatusKey(): SummaryStatusKey {
         snapshot.packages.count { result ->
             selectedUserIds.any { userId ->
                 result.users[userId] == PackageState.INSTALLED ||
-                    result.users[userId] == PackageState.DISABLED
+                    result.users[userId] == PackageState.DISABLED ||
+                    result.users[userId] == PackageState.SUSPENDED
             }
         }
     } else {

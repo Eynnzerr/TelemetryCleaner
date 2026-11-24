@@ -395,6 +395,7 @@ private fun ComponentRow(
 internal fun PackageState?.statusTone(): StatusTone = when (this) {
     PackageState.INSTALLED -> StatusTone.TERTIARY
     PackageState.DISABLED -> StatusTone.SECONDARY
+    PackageState.SUSPENDED -> StatusTone.SECONDARY
     PackageState.RESTORABLE, PackageState.NOT_FOUND -> StatusTone.NEUTRAL
     PackageState.UNKNOWN, null -> StatusTone.ERROR
 }

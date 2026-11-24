@@ -25,6 +25,7 @@ import kotlinx.coroutines.ensureActive
  * @property hasVerifiedSystemIdentity Whether the record identifies a system package with an application-range ID.
  * @property hasSystemCopy Whether the package flags indicate a system copy, or null if flags are unavailable.
  * @property enabledSettings The raw Android enabled settings keyed by user ID.
+ * @property suspendedSettings Whether each user currently has the package suspended.
  */
 internal data class PackageRecord(
     val versionName: String?,
@@ -34,6 +35,7 @@ internal data class PackageRecord(
     val hasSystemCopy: Boolean?,
     val users: Map<Int, PackageState>,
     val enabledSettings: Map<Int, Int>,
+    val suspendedSettings: Map<Int, Boolean> = emptyMap(),
     /** Whether dump fields positively confirm or deny that an APK still exists on disk, or null if ambiguous. */
     val hasVerifiedApk: Boolean? = null,
     /** The permission details read during an interactive scan. */
@@ -66,7 +68,10 @@ internal fun PackageReading.toLookupResult(): PackageLookupResult = when (this) 
     is PackageReading.Unavailable -> PackageLookupResult.Unavailable
     is PackageReading.Found -> when {
         record.users.values.any {
-            it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
+            it == PackageState.INSTALLED ||
+                it == PackageState.DISABLED ||
+                it == PackageState.SUSPENDED ||
+                it == PackageState.RESTORABLE
         } -> PackageLookupResult.Found(record)
         record.hasVerifiedApk == false &&
             record.users.isNotEmpty() &&
@@ -323,7 +328,10 @@ internal class PackageCommands(
         if (reenable && record.enabledSettings[target.userId] != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
             return ChangeOutcome(target, false, ChangeFailure.DisabledBySystem)
         }
-        if (action == PackageAction.UNINSTALL && state == PackageState.DISABLED && !allowDisabledForUninstall) {
+        if (action == PackageAction.UNINSTALL &&
+            (state == PackageState.DISABLED || state == PackageState.SUSPENDED) &&
+            !allowDisabledForUninstall
+        ) {
             return if (requireVerifiedSystemIdentity) {
                 // Background cleanup skips already-frozen packages without wiping user data or recording a failure.
                 ChangeOutcome(target, true, null)
@@ -339,7 +347,9 @@ internal class PackageCommands(
         ) {
             return ChangeOutcome(target, false, ChangeFailure.SpaceStateUnverified)
         }
-        if (!reenable && reading.matches(target, action)) return ChangeOutcome(target, true, null)
+        if (!reenable && reading.matches(target, action)) {
+            return ChangeOutcome(target, true, null, suspendedInstead = state == PackageState.SUSPENDED)
+        }
         if (!reenable && !state.permits(action)) {
             val failure = if (action == PackageAction.DISABLE) {
                 ChangeFailure.NotEnabledInSpace
@@ -357,10 +367,10 @@ internal class PackageCommands(
                 add(packageName)
             }
             PackageAction.DISABLE -> target.disableCommand()
-            PackageAction.RESTORE -> if (reenable) {
-                listOf("enable", "--user", userId, packageName)
-            } else {
-                listOf("install-existing", "--user", userId, "--wait", packageName)
+            PackageAction.RESTORE -> when {
+                state == PackageState.SUSPENDED -> target.unsuspendCommand()
+                reenable -> listOf("enable", "--user", userId, packageName)
+                else -> listOf("install-existing", "--user", userId, "--wait", packageName)
             }
         }
         currentCoroutineContext().ensureActive()
@@ -379,6 +389,22 @@ internal class PackageCommands(
         }
         if (completed) {
             return ChangeOutcome(target, true, null)
+        }
+
+        // Some OEM package managers refuse to disable system apps but still allow Android's
+        // reversible suspension API. Keep the original command result for diagnostics.
+        var suspendAttempt: Result<PackageShellResult>? = null
+        if (action == PackageAction.DISABLE && canSubmit()) {
+            currentCoroutineContext().ensureActive()
+            suspendAttempt = executeChange(target.suspendCommand())
+            val afterSuspend = read(packageName)
+            if (afterSuspend.matches(target, PackageAction.DISABLE)) {
+                return ChangeOutcome(
+                    target,
+                    success = true,
+                    suspendedInstead = afterSuspend.suspendedFor(target.userId) == true,
+                )
+            }
         }
 
         var submitDeniedOnRetry = false
@@ -431,7 +457,7 @@ internal class PackageCommands(
             }
         }
 
-        val result = attempt.getOrNull()
+        val result = attempt.getOrNull() ?: suspendAttempt?.getOrNull()
         val failure = attempt.exceptionOrNull()
         if (failure != null && failure !is SecurityException && disableAttempt == null && !submitDeniedOnRetry) throw failure
         val rejected = failure is SecurityException ||
@@ -502,6 +528,10 @@ internal class PackageCommands(
     private fun PackageReading.enabledFor(userId: Int): Int? =
         (this as? PackageReading.Found)?.record?.enabledSettings?.get(userId)
 
+    /** Returns whether the package dump explicitly reports this user as suspended. */
+    private fun PackageReading.suspendedFor(userId: Int): Boolean? =
+        (this as? PackageReading.Found)?.record?.suspendedSettings?.get(userId)
+
     /** Whether Android explicitly reported an enabled (DEFAULT or ENABLED) component state. */
     private fun Int?.isExplicitlyEnabled(): Boolean =
         this == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT ||
@@ -510,6 +540,14 @@ internal class PackageCommands(
     /** Builds a disable request for the exact package and user in the confirmation. */
     private fun ChangeTarget.disableCommand(): List<String> =
         listOf("disable-user", "--user", userId.toString(), packageName)
+
+    /** Builds a reversible suspension request used when disable-user is refused. */
+    private fun ChangeTarget.suspendCommand(): List<String> =
+        listOf("suspend", "--user", userId.toString(), packageName)
+
+    /** Builds the inverse of [suspendCommand] for restoring a paused package. */
+    private fun ChangeTarget.unsuspendCommand(): List<String> =
+        listOf("unsuspend", "--user", userId.toString(), packageName)
 
     /** Resolves a target's installation state, including when its whole package record is gone. */
     private fun readUserState(
@@ -525,14 +563,16 @@ internal class PackageCommands(
     private fun PackageReading.versionCode(): Long? =
         (this as? PackageReading.Found)?.record?.versionCode
 
-    /** Verifies the resulting state, distinguishing a user freeze from system-disabled states. */
+    /** Verifies the resulting state, distinguishing user freeze, disable, and suspension states. */
     private fun PackageReading.matches(target: ChangeTarget, action: PackageAction): Boolean {
         val state = readUserState(target, this)
         return when (action) {
             PackageAction.UNINSTALL -> state == PackageState.RESTORABLE || state == PackageState.NOT_FOUND
-            PackageAction.DISABLE -> state == PackageState.DISABLED &&
-                enabledFor(target.userId) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
-            PackageAction.RESTORE -> state == PackageState.INSTALLED || state == PackageState.DISABLED
+            PackageAction.DISABLE -> state == PackageState.SUSPENDED ||
+                (state == PackageState.DISABLED &&
+                    enabledFor(target.userId) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER)
+            PackageAction.RESTORE -> (state == PackageState.INSTALLED || state == PackageState.DISABLED) &&
+                suspendedFor(target.userId) != true
         }
     }
 
@@ -579,17 +619,21 @@ internal class PackageCommands(
         val codePath = fields.firstOrNull { it.startsWith("codePath=") }
             ?.substringAfter('=')?.takeUnless { it.isBlank() || it == "null" }
         val enabledSettings = mutableMapOf<Int, Int>()
+        val suspendedSettings = mutableMapOf<Int, Boolean>()
         val users = lines.mapNotNull { line ->
             val match = userHeader.matchEntire(line) ?: return@mapNotNull null
             val id = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
             val data = match.groupValues[2]
             val enabled = enabledFlag.find(data)?.groupValues?.get(1)?.toIntOrNull()
             if (enabled != null) enabledSettings[id] = enabled
+            val suspended = suspendedFlag.find(data)?.groupValues?.get(1)?.toBooleanStrictOrNull()
+            if (suspended != null) suspendedSettings[id] = suspended
             val state = when (installedFlag.find(data)?.groupValues?.get(1)) {
-                "true" -> when (enabled) {
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED -> PackageState.DISABLED
+                "true" -> when {
+                    suspended == true -> PackageState.SUSPENDED
+                    enabled == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
+                        enabled == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
+                        enabled == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED -> PackageState.DISABLED
                     else -> PackageState.INSTALLED
                 }
                 "false" -> PackageState.NOT_FOUND
@@ -615,6 +659,7 @@ internal class PackageCommands(
             hasVerifiedSystemIdentity = isSystem && appId != null && appId >= 10_000,
             hasSystemCopy = isSystem.takeIf { flagFields.isNotEmpty() },
             enabledSettings = enabledSettings,
+            suspendedSettings = suspendedSettings,
             hasVerifiedApk = hasVerifiedApk,
             users = if (hasVerifiedApk == true) {
                 users.mapValues { (_, state) -> if (state == PackageState.NOT_FOUND) PackageState.RESTORABLE else state }
@@ -646,6 +691,7 @@ internal class PackageCommands(
         val listedUser = Regex("""^\s*UserInfo\{(\d+):(.*):[a-fA-F0-9]+\}.*$""")
         val installedFlag = Regex("""\binstalled=(true|false)\b""")
         val enabledFlag = Regex("""\benabled=(\d+)\b""")
+        val suspendedFlag = Regex("""\bsuspended=(true|false)\b""")
         val versionCode = Regex("""^versionCode=(\d+)\b""")
 
         val postPackagesSectionHeaders = setOf(

@@ -60,6 +60,7 @@ internal fun DetectedPackage.installationStatusLabel(userId: Int): Int = when (u
     PackageState.DISABLED -> {
         if (userId in userDisabledIds) R.string.status_disabled else R.string.status_disabled_by_system
     }
+    PackageState.SUSPENDED -> R.string.status_suspended
     PackageState.RESTORABLE -> R.string.status_restorable
     PackageState.NOT_FOUND -> R.string.status_not_found
     PackageState.UNKNOWN, null -> when (scanIssues[userId]) {
@@ -82,6 +83,10 @@ internal fun PackageFamily.label(): Int = when (this) {
     PackageFamily.HONOR -> R.string.package_family_honor
     PackageFamily.FLYME -> R.string.package_family_flyme
     PackageFamily.NUBIA -> R.string.package_family_nubia
+    PackageFamily.SAMSUNG -> R.string.package_family_samsung
+    PackageFamily.MOTOROLA -> R.string.package_family_motorola
+    PackageFamily.ZTE -> R.string.package_family_zte
+    PackageFamily.BROWSER -> R.string.package_family_browser
 }
 
 /** Resolves a structured change failure into localized UI copy or preserves raw system output. */

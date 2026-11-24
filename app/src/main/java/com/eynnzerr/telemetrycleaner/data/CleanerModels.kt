@@ -51,6 +51,7 @@ data class AndroidUser(val id: Int, val name: String, val serialNumber: Long? = 
 enum class PackageState {
     INSTALLED,
     DISABLED,
+    SUSPENDED,
     RESTORABLE,
     NOT_FOUND,
     UNKNOWN,
@@ -105,7 +106,10 @@ data class DetectedPackage(
 ) {
     /** Identifies components with enough package data to display an interactive row. */
     fun hasVisibleRecord(): Boolean = systemPath != null || users.values.any {
-        it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
+        it == PackageState.INSTALLED ||
+            it == PackageState.DISABLED ||
+            it == PackageState.SUSPENDED ||
+            it == PackageState.RESTORABLE
     }
 
     /**
@@ -116,6 +120,7 @@ data class DetectedPackage(
         hasSystemCopy == false && users.none { (userId, status) ->
             status == PackageState.UNKNOWN ||
                 status == PackageState.DISABLED ||
+                status == PackageState.SUSPENDED ||
                 (userId !in targetUserIds && status == PackageState.INSTALLED)
         }
 
@@ -124,6 +129,7 @@ data class DetectedPackage(
         selectedUserIds.any { userId ->
             val state = users[userId]
             state == PackageState.INSTALLED ||
+                state == PackageState.SUSPENDED ||
                 state == PackageState.RESTORABLE ||
                 (state == PackageState.DISABLED && userId in userDisabledIds)
         }
@@ -142,7 +148,7 @@ data class DetectedPackage(
             val state = users[userId]
             when (action) {
                 PackageAction.UNINSTALL -> state.permits(action) &&
-                    (includeDisabledForUninstall || state != PackageState.DISABLED)
+                    (includeDisabledForUninstall || (state != PackageState.DISABLED && state != PackageState.SUSPENDED))
                 PackageAction.DISABLE -> state.permits(action)
                 PackageAction.RESTORE -> state.permits(action) ||
                     (state == PackageState.DISABLED && userId in userDisabledIds)
@@ -199,9 +205,11 @@ enum class PackageAction { UNINSTALL, DISABLE, RESTORE }
 
 /** Whether this observed package state is a valid starting point for the action. */
 internal fun PackageState?.permits(action: PackageAction): Boolean = when (action) {
-    PackageAction.UNINSTALL -> this == PackageState.INSTALLED || this == PackageState.DISABLED
+    PackageAction.UNINSTALL -> this == PackageState.INSTALLED ||
+        this == PackageState.DISABLED ||
+        this == PackageState.SUSPENDED
     PackageAction.DISABLE -> this == PackageState.INSTALLED
-    PackageAction.RESTORE -> this == PackageState.RESTORABLE
+    PackageAction.RESTORE -> this == PackageState.RESTORABLE || this == PackageState.SUSPENDED
 }
 
 /**
@@ -273,6 +281,7 @@ sealed interface ChangeFailure {
  * @property failure The structured reason an operation failed or could not be confirmed.
  * @property denialLog Diagnostics from a manual uninstall rejected by the package service.
  * @property disabledInstead Whether the fallback left the package installed and explicitly disabled.
+ * @property suspendedInstead Whether the fallback paused the package through Android's suspension API.
  */
 data class ChangeOutcome(
     val target: ChangeTarget,
@@ -280,4 +289,5 @@ data class ChangeOutcome(
     val failure: ChangeFailure? = null,
     val denialLog: String? = null,
     val disabledInstead: Boolean = false,
+    val suspendedInstead: Boolean = false,
 )

@@ -73,6 +73,13 @@ jobs:
           cp "$apk" "$asset"
           printf 'path=%s\n' "$asset" >> "$GITHUB_OUTPUT"
 
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TelemetryCleaner-${{ github.ref_name }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
       - name: Generate release notes
         id: notes
         run: |

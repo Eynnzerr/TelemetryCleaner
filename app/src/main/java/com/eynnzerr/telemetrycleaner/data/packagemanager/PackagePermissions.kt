@@ -40,7 +40,9 @@ internal fun readComponentPermissions(
         dump.section { it.trimEnd() == "Shared users:" }
             ?.section { it.startsWith("  SharedUser [$name]") }
     }.orEmpty()
-    val grantsByUser = record.users.filterValues { it == PackageState.INSTALLED || it == PackageState.DISABLED }
+    val grantsByUser = record.users.filterValues {
+        it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.SUSPENDED
+    }
         .mapValues { (userId, _) ->
             packageBlock.installGrants(userId) + sharedBlock.installGrants(userId) +
                 packageBlock.userGrants(userId) + sharedBlock.userGrants(userId)

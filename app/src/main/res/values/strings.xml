@@ -2,7 +2,7 @@
 <resources>
     <string name="freeze_only">Disable only</string>
     <string name="freeze_title">Disable components</string>
-    <string name="freeze_description">This disables the selected components in the spaces shown below and keeps their app data.</string>
+    <string name="freeze_description">This disables or suspends the selected components in the spaces shown below and keeps their app data.</string>
     <string name="freeze_action">Disable</string>
     <string name="app_name">Telemetry Cleaner</string>
     <string name="carrier_unicom">China Unicom</string>
@@ -156,8 +156,13 @@
     <string name="package_family_honor">Honor</string>
     <string name="package_family_flyme">Meizu / Flyme</string>
     <string name="package_family_nubia">Nubia / REDMAGIC</string>
+    <string name="package_family_samsung">Samsung</string>
+    <string name="package_family_motorola">Motorola</string>
+    <string name="package_family_zte">ZTE</string>
+    <string name="package_family_browser">Built-in browsers</string>
     <string name="status_installed">Installed</string>
     <string name="status_disabled">Disabled</string>
+    <string name="status_suspended">Paused</string>
     <string name="status_disabled_by_system">System-disabled</string>
     <string name="status_restorable">Uninstalled</string>
     <string name="status_not_found">Not found</string>

@@ -3,6 +3,7 @@ package com.eynnzerr.telemetrycleaner.feature.packages
 import com.eynnzerr.telemetrycleaner.BuildConfig
 import com.eynnzerr.telemetrycleaner.data.CriticalSystemPackages
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
+import com.eynnzerr.telemetrycleaner.data.isExactPackageName
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -19,6 +20,21 @@ class PackageDirectoryValidationTest {
         )
         val overlap = CriticalSystemPackages.names intersect PackageDirectory.variants.keys
         assertTrue("Conflicting package names: $overlap", overlap.isEmpty())
+    }
+
+    @Test
+    fun bundledDirectoryHasUniqueExactPackageNames() {
+        val names = PackageDirectory.groups.values.flatten().map { it.packageName }
+        assertEquals("Duplicate package names in bundled directory", names.size, names.toSet().size)
+        for (name in names) {
+            assertTrue("Malformed package name: $name", isExactPackageName(name))
+        }
+    }
+
+    @Test
+    fun autoCleanupTargetsStayInBundledDirectory() {
+        val unknown = PackageDirectory.autoCleanupNames - PackageDirectory.variants.keys
+        assertTrue("Auto cleanup targets missing from directory: $unknown", unknown.isEmpty())
     }
 
     @Test
@@ -80,7 +96,6 @@ class PackageDirectoryValidationTest {
             "com.xiaomi.xmsf",
             "com.coloros.phonemanager",
             "com.oplus.safecenter",
-            "com.oplus.statistics.rom",
             "com.coloros.activation",
             "com.oplus.olc",
             "com.iqoo.secure",

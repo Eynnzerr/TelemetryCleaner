@@ -2,7 +2,7 @@
 <resources>
     <string name="freeze_only">仅冻结</string>
     <string name="freeze_title">冻结组件</string>
-    <string name="freeze_description">在下列空间中冻结所选组件，保留应用数据。</string>
+    <string name="freeze_description">在下列空间中冻结（停用或暂停）所选组件，保留应用数据。</string>
     <string name="freeze_action">冻结</string>
     <string name="app_name">遥测组件清理</string>
     <string name="carrier_unicom">中国联通</string>
@@ -152,8 +152,13 @@
     <string name="package_family_honor">荣耀</string>
     <string name="package_family_flyme">魅族 / Flyme</string>
     <string name="package_family_nubia">努比亚 / 红魔</string>
+    <string name="package_family_samsung">三星</string>
+    <string name="package_family_motorola">Moto / 联想</string>
+    <string name="package_family_zte">中兴</string>
+    <string name="package_family_browser">内置浏览器</string>
     <string name="status_installed">已安装</string>
     <string name="status_disabled">已冻结</string>
+    <string name="status_suspended">已暂停</string>
     <string name="status_disabled_by_system">系统停用</string>
     <string name="status_restorable">已卸载</string>
     <string name="status_not_found">未检出</string>

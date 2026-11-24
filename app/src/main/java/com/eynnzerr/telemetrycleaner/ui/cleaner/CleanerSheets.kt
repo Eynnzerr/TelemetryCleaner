@@ -188,7 +188,9 @@ internal fun CleanerSheetContent(
                             stringResource(R.string.uninstalled_result) to StatusTone.PRIMARY
                         }
                         outcome.success && panel.action == PackageAction.DISABLE -> {
-                            stringResource(R.string.status_disabled) to StatusTone.SECONDARY
+                            stringResource(
+                                if (outcome.suspendedInstead) R.string.status_suspended else R.string.status_disabled,
+                            ) to StatusTone.SECONDARY
                         }
                         outcome.success -> stringResource(R.string.restored_result) to StatusTone.PRIMARY
                         else -> (outcome.failure?.displayMessage() ?: stringResource(R.string.unverified_result)) to StatusTone.ERROR
