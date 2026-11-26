@@ -43,6 +43,8 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TonalToggleButton
 import androidx.compose.material3.ripple
@@ -61,6 +63,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -71,14 +74,19 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.AndroidUser
+import com.eynnzerr.telemetrycleaner.data.DhizukuStatus
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
 import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.ThemePalette
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerActivity
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerError
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerState
+import com.eynnzerr.telemetrycleaner.ui.components.ExpressiveButton
+import com.eynnzerr.telemetrycleaner.ui.components.ExpressiveButtonSize
 import com.eynnzerr.telemetrycleaner.ui.components.SegmentedListDefaults
+import com.eynnzerr.telemetrycleaner.ui.components.actionLabel
 import com.eynnzerr.telemetrycleaner.ui.components.displayName
+import com.eynnzerr.telemetrycleaner.ui.components.performDhizukuStatusAction
 import com.eynnzerr.telemetrycleaner.ui.components.rememberAnimatedSegmentedShape
 import com.eynnzerr.telemetrycleaner.ui.components.segmentedContainerColor
 import com.eynnzerr.telemetrycleaner.ui.components.segmentedItemShape
@@ -87,16 +95,25 @@ import com.eynnzerr.telemetrycleaner.ui.theme.TelemetryCleanerTheme
 import com.eynnzerr.telemetrycleaner.ui.theme.previewColors
 
 /**
- * Lets the user select the privilege backend using an Expressive Connected ButtonGroup
- * instead of icon-less radio rows.
+ * Lets the user select the privilege backend using an Expressive Connected ButtonGroup,
+ * plus an optional Dhizuku Device Owner enhancement card when Shizuku is selected.
  */
 @Composable
-internal fun PrivilegeBackendSettings(state: CleanerState, onSelect: (PrivilegeBackend) -> Unit) {
+internal fun PrivilegeBackendSettings(
+    state: CleanerState,
+    onSelect: (PrivilegeBackend) -> Unit,
+    dhizukuFallbackEnabled: Boolean?,
+    dhizukuStatus: DhizukuStatus,
+    onDhizukuFallbackChange: (Boolean) -> Unit,
+    onRequestDhizukuPermission: () -> Unit,
+    onRefreshDhizukuStatus: () -> Unit,
+) {
     val enabled = state.activity == CleanerActivity.IDLE && state.connection.status != PrivilegeStatus.CONNECTING
+    val showDhizuku = state.connection.backend == PrivilegeBackend.SHIZUKU
     SettingsGroup(stringResource(R.string.settings_privilege_backend)) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(SegmentedListDefaults.OuterCorner),
+            shape = if (showDhizuku) segmentedItemShape(0, 2) else RoundedCornerShape(SegmentedListDefaults.OuterCorner),
             color = segmentedContainerColor(),
         ) {
             Column(
@@ -157,6 +174,121 @@ internal fun PrivilegeBackendSettings(state: CleanerState, onSelect: (PrivilegeB
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )
+                }
+            }
+        }
+        if (showDhizuku) {
+            DhizukuEnhancementItem(
+                enabled = dhizukuFallbackEnabled,
+                status = dhizukuStatus,
+                onEnabledChange = onDhizukuFallbackChange,
+                onRequestPermission = onRequestDhizukuPermission,
+                onRefreshStatus = onRefreshDhizukuStatus,
+            )
+        }
+    }
+}
+
+/** Optional Dhizuku Device Owner enhancement row shown beneath Shizuku access selection. */
+@Composable
+private fun DhizukuEnhancementItem(
+    enabled: Boolean?,
+    status: DhizukuStatus,
+    onEnabledChange: (Boolean) -> Unit,
+    onRequestPermission: () -> Unit,
+    onRefreshStatus: () -> Unit,
+) {
+    val context = LocalContext.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val shape = rememberAnimatedSegmentedShape(index = 1, count = 2, interactionSource = interactionSource)
+    val checked = enabled == true
+    val statusTextRes = if (!checked) {
+        R.string.settings_dhizuku_enhancement_description
+    } else {
+        when (status) {
+            DhizukuStatus.READY -> R.string.dhizuku_status_ready
+            DhizukuStatus.PERMISSION_REQUIRED -> R.string.dhizuku_status_permission_required
+            DhizukuStatus.INACTIVE -> R.string.dhizuku_status_inactive
+            DhizukuStatus.MISSING -> R.string.dhizuku_status_missing
+            DhizukuStatus.ERROR -> R.string.dhizuku_status_error
+        }
+    }
+    val statusColor = when {
+        !checked -> MaterialTheme.colorScheme.onSurfaceVariant
+        status == DhizukuStatus.READY -> MaterialTheme.colorScheme.primary
+        status == DhizukuStatus.ERROR -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().clip(shape),
+        shape = shape,
+        color = segmentedContainerColor(),
+    ) {
+        Column {
+            ListItem(
+                modifier = Modifier.toggleable(
+                    value = checked,
+                    enabled = enabled != null,
+                    role = Role.Switch,
+                    interactionSource = interactionSource,
+                    indication = ripple(),
+                    onValueChange = onEnabledChange,
+                ),
+                headlineContent = {
+                    Text(
+                        stringResource(R.string.settings_dhizuku_enhancement),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        text = stringResource(statusTextRes),
+                        color = statusColor,
+                    )
+                },
+                leadingContent = {
+                    Icon(painterResource(R.drawable.ic_settings_check), contentDescription = null)
+                },
+                trailingContent = {
+                    Switch(
+                        checked = checked,
+                        enabled = enabled != null,
+                        onCheckedChange = null,
+                        thumbContent = if (checked) {
+                            {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_settings_check),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(SwitchDefaults.IconSize),
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
+            AnimatedVisibility(visible = checked && status != DhizukuStatus.READY) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 56.dp, end = 16.dp, bottom = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ExpressiveButton(
+                        label = status.actionLabel(),
+                        size = ExpressiveButtonSize.SMALL,
+                    ) {
+                        performDhizukuStatusAction(
+                            context = context,
+                            status = status,
+                            onRequestPermission = onRequestPermission,
+                            onRefreshStatus = onRefreshStatus,
+                        )
+                    }
                 }
             }
         }

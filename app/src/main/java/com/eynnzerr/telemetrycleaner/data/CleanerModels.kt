@@ -8,6 +8,11 @@ enum class PrivilegeStatus {
     MISSING, STOPPED, PERMISSION_REQUIRED, CONNECTING, READY, ERROR
 }
 
+/** Availability of the optional Dhizuku Device Owner bridge used to assist Shizuku operations. */
+enum class DhizukuStatus {
+    MISSING, INACTIVE, PERMISSION_REQUIRED, READY, ERROR
+}
+
 /**
  * The backend selected for both manual operations and automatic cleanup.
  *
@@ -51,6 +56,7 @@ data class AndroidUser(val id: Int, val name: String, val serialNumber: Long? = 
 enum class PackageState {
     INSTALLED,
     DISABLED,
+    HIDDEN,
     RESTORABLE,
     NOT_FOUND,
     UNKNOWN,
@@ -105,7 +111,10 @@ data class DetectedPackage(
 ) {
     /** Identifies components with enough package data to display an interactive row. */
     fun hasVisibleRecord(): Boolean = systemPath != null || users.values.any {
-        it == PackageState.INSTALLED || it == PackageState.DISABLED || it == PackageState.RESTORABLE
+        it == PackageState.INSTALLED ||
+            it == PackageState.DISABLED ||
+            it == PackageState.HIDDEN ||
+            it == PackageState.RESTORABLE
     }
 
     /**
@@ -116,6 +125,7 @@ data class DetectedPackage(
         hasSystemCopy == false && users.none { (userId, status) ->
             status == PackageState.UNKNOWN ||
                 status == PackageState.DISABLED ||
+                status == PackageState.HIDDEN ||
                 (userId !in targetUserIds && status == PackageState.INSTALLED)
         }
 
@@ -125,6 +135,7 @@ data class DetectedPackage(
             val state = users[userId]
             state == PackageState.INSTALLED ||
                 state == PackageState.RESTORABLE ||
+                state == PackageState.HIDDEN ||
                 (state == PackageState.DISABLED && userId in userDisabledIds)
         }
 
@@ -142,9 +153,10 @@ data class DetectedPackage(
             val state = users[userId]
             when (action) {
                 PackageAction.UNINSTALL -> state.permits(action) &&
-                    (includeDisabledForUninstall || state != PackageState.DISABLED)
+                    (includeDisabledForUninstall || (state != PackageState.DISABLED && state != PackageState.HIDDEN))
                 PackageAction.DISABLE -> state.permits(action)
                 PackageAction.RESTORE -> state.permits(action) ||
+                    state == PackageState.HIDDEN ||
                     (state == PackageState.DISABLED && userId in userDisabledIds)
             }
         }.map { userId ->
@@ -199,7 +211,9 @@ enum class PackageAction { UNINSTALL, DISABLE, RESTORE }
 
 /** Whether this observed package state is a valid starting point for the action. */
 internal fun PackageState?.permits(action: PackageAction): Boolean = when (action) {
-    PackageAction.UNINSTALL -> this == PackageState.INSTALLED || this == PackageState.DISABLED
+    PackageAction.UNINSTALL -> this == PackageState.INSTALLED ||
+        this == PackageState.DISABLED ||
+        this == PackageState.HIDDEN
     PackageAction.DISABLE -> this == PackageState.INSTALLED
     PackageAction.RESTORE -> this == PackageState.RESTORABLE
 }
@@ -246,6 +260,9 @@ sealed interface ChangeFailure {
     /** The package was disabled by the system rather than the user and cannot be re-enabled. */
     data object DisabledBySystem : ChangeFailure
 
+    /** The package was hidden by a device owner and requires Dhizuku or Root to restore. */
+    data object HiddenByDeviceOwner : ChangeFailure
+
     /** Disable was requested for a package that is not currently enabled in this space. */
     data object NotEnabledInSpace : ChangeFailure
 
@@ -272,12 +289,12 @@ sealed interface ChangeFailure {
  * @property success Whether Android reports the requested resulting state.
  * @property failure The structured reason an operation failed or could not be confirmed.
  * @property denialLog Diagnostics from a manual uninstall rejected by the package service.
- * @property disabledInstead Whether the fallback left the package installed and explicitly disabled.
+ * @property hiddenInstead Whether Dhizuku hid the package as a fallback when disabling it was blocked.
  */
 data class ChangeOutcome(
     val target: ChangeTarget,
     val success: Boolean,
     val failure: ChangeFailure? = null,
     val denialLog: String? = null,
-    val disabledInstead: Boolean = false,
+    val hiddenInstead: Boolean = false,
 )

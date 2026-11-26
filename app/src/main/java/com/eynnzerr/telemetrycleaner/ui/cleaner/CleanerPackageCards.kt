@@ -394,7 +394,7 @@ private fun ComponentRow(
 /** Maps a package installation state to its semantic Material 3 Expressive badge tone. */
 internal fun PackageState?.statusTone(): StatusTone = when (this) {
     PackageState.INSTALLED -> StatusTone.TERTIARY
-    PackageState.DISABLED -> StatusTone.SECONDARY
+    PackageState.DISABLED, PackageState.HIDDEN -> StatusTone.SECONDARY
     PackageState.RESTORABLE, PackageState.NOT_FOUND -> StatusTone.NEUTRAL
     PackageState.UNKNOWN, null -> StatusTone.ERROR
 }

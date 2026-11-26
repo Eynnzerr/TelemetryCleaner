@@ -13,8 +13,6 @@
     <string name="settings_group_cleanup">清理</string>
     <string name="settings_group_appearance">外观</string>
     <string name="settings_group_about">关于</string>
-    <string name="settings_disable_on_uninstall_failure">卸载失败时尝试冻结</string>
-    <string name="settings_disable_on_uninstall_failure_description">停用组件但保留数据</string>
     <string name="settings_auto_cleanup_description">约每 %1$s复查所选空间</string>
     <string name="settings_auto_cleanup_interval">清理周期</string>
     <string name="settings_auto_cleanup_interval_unit">分钟</string>
@@ -74,6 +72,22 @@
     <string name="permission_explanation">在 Shizuku 弹出的对话框中允许本应用使用服务。</string>
     <string name="waiting_for_shizuku">正在等待 Shizuku 服务。</string>
     <string name="settings_privilege_backend">权限来源</string>
+    <string name="settings_dhizuku_enhancement">Dhizuku 增强</string>
+    <string name="settings_dhizuku_enhancement_description">Shizuku 卸载或冻结被系统拦截时，尝试通过 Dhizuku（设备所有者）处理主空间受保护组件。</string>
+    <string name="dhizuku_status_ready">Dhizuku 已就绪 · 仅在 Shizuku 被拦截时用于主空间</string>
+    <string name="dhizuku_status_permission_required">已检测到 Dhizuku，请授权本应用使用</string>
+    <string name="dhizuku_status_inactive">已安装 Dhizuku，但尚未激活设备所有者</string>
+    <string name="dhizuku_status_missing">未安装 Dhizuku</string>
+    <string name="dhizuku_status_error">Dhizuku 连接失败</string>
+    <string name="get_dhizuku">获取 Dhizuku</string>
+    <string name="open_dhizuku">打开 Dhizuku</string>
+    <string name="dhizuku_results_inactive_title">Dhizuku 增强未生效</string>
+    <string name="dhizuku_results_ready_title">Dhizuku 已就绪</string>
+    <string name="dhizuku_results_missing_message">当前未安装 Dhizuku，无法通过设备所有者通道处理主空间组件。安装并激活后可重试。</string>
+    <string name="dhizuku_results_inactive_message">已安装 Dhizuku，但尚未激活设备所有者。请先打开 Dhizuku 完成激活后再试。</string>
+    <string name="dhizuku_results_permission_message">尚未授予本应用 Dhizuku 使用权限。授权完成后关闭此面板再试。</string>
+    <string name="dhizuku_results_error_message">暂时无法连接到 Dhizuku 服务。请检查 Dhizuku 状态后重试。</string>
+    <string name="dhizuku_results_ready_message">关闭此面板后，可重新尝试主空间操作。</string>
     <string name="backend_shizuku">Shizuku</string>
     <string name="backend_root">Root</string>
     <string name="use_shizuku">使用 Shizuku</string>
@@ -155,6 +169,7 @@
     <string name="status_installed">已安装</string>
     <string name="status_disabled">已冻结</string>
     <string name="status_disabled_by_system">系统停用</string>
+    <string name="status_hidden">已隐藏</string>
     <string name="status_restorable">已卸载</string>
     <string name="status_not_found">未检出</string>
     <string name="status_known_components_not_found">未检出已知组件</string>
@@ -204,7 +219,7 @@
     <string name="confirm_restore">恢复组件</string>
     <string name="uninstall_description">将卸载所选空间中的组件并清除组件数据。</string>
     <string name="confirm_uninstall_last_apk_warning">卸载后无法恢复（将移除设备上最后一份 APK）</string>
-    <string name="restore_description">已停用的组件将重新启用，已卸载的组件将用设备上保留的 APK 恢复。</string>
+    <string name="restore_description">已停用或已隐藏的组件将恢复启用，已卸载的组件将用设备上保留的 APK 恢复。</string>
     <string name="cancel">取消</string>
     <string name="done">完成</string>
     <string name="close">关闭</string>
@@ -214,7 +229,6 @@
     <string name="uninstall_denial_feedback_hint">卸载被系统拒绝，可点下方图标复制日志并反馈。</string>
     <string name="uninstall_denial_logs_copied">已复制卸载拒绝日志</string>
     <string name="uninstalled_result">卸载成功</string>
-    <string name="disabled_instead_result">未卸载，已停用</string>
     <string name="restored_result">恢复成功</string>
     <string name="unverified_result">未能确认请求的变更</string>
     <string name="change_error_not_managed">该组件不在管理清单中。</string>
@@ -226,6 +240,7 @@
     <string name="change_error_system_identity_not_verified">该包的系统身份未通过核验。</string>
     <string name="change_error_space_state_unverified">无法确认该空间的组件状态。</string>
     <string name="change_error_disabled_by_system">系统停用了该组件，无法重新启用。</string>
+    <string name="change_error_hidden_by_device_owner">该组件被设备所有者隐藏，请启用并授权 Dhizuku，或使用 Root 恢复。</string>
     <string name="change_error_not_enabled_in_space">该空间的组件未处于启用状态。</string>
     <string name="change_error_no_restorable_copy">设备上没有可用于恢复的组件副本。</string>
     <string name="change_error_post_change_state_unverified">无法确认操作后的状态。请刷新后再试。</string>

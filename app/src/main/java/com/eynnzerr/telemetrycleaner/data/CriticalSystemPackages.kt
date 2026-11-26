@@ -72,9 +72,10 @@ internal object CriticalSystemPackages {
         "com.samsung.android.dialer",
         "com.samsung.android.incallui",
 
-        // Tool self and privilege/recovery dependencies (3)
+        // Tool self and privilege/recovery dependencies (4)
         "com.android.shell",
         "moe.shizuku.privileged.api",
+        "com.rosan.dhizuku",
         BuildConfig.APPLICATION_ID,
     )
 

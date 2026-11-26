@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.datastore.preferences.preferencesDataStore
 import com.eynnzerr.telemetrycleaner.data.CleanerRepository
+import com.eynnzerr.telemetrycleaner.data.packagemanager.DhizukuBridge
+import com.eynnzerr.telemetrycleaner.data.packagemanager.DhizukuController
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PrivilegeSessionManager
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupHistoryStore
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
@@ -26,10 +28,12 @@ private val cleanerModule = module {
     single { CleanerSettings(get()) }
     single { AutoCleanupHistoryStore(get()) }
     single { PrivilegeSessionManager(androidContext(), get()) }
-    single { CleanerRepository(androidContext(), get(), get()) }
+    single { DhizukuBridge(androidContext()) }
+    single<DhizukuController> { get<DhizukuBridge>() }
+    single { CleanerRepository(androidContext(), get(), get(), get()) }
     viewModelOf(::CleanerViewModel)
     viewModel { PackageDirectoryViewModel(get<CleanerRepository>(), get()) }
-    viewModelOf(::SettingsViewModel)
+    viewModel { SettingsViewModel(get(), get()) }
     viewModelOf(::AutoCleanupHistoryViewModel)
 }
 

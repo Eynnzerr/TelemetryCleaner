@@ -60,6 +60,7 @@ internal fun DetectedPackage.installationStatusLabel(userId: Int): Int = when (u
     PackageState.DISABLED -> {
         if (userId in userDisabledIds) R.string.status_disabled else R.string.status_disabled_by_system
     }
+    PackageState.HIDDEN -> R.string.status_hidden
     PackageState.RESTORABLE -> R.string.status_restorable
     PackageState.NOT_FOUND -> R.string.status_not_found
     PackageState.UNKNOWN, null -> when (scanIssues[userId]) {
@@ -97,6 +98,7 @@ internal fun ChangeFailure.displayMessage(): String = when (this) {
     ChangeFailure.SystemIdentityNotVerified -> stringResource(R.string.change_error_system_identity_not_verified)
     ChangeFailure.SpaceStateUnverified -> stringResource(R.string.change_error_space_state_unverified)
     ChangeFailure.DisabledBySystem -> stringResource(R.string.change_error_disabled_by_system)
+    ChangeFailure.HiddenByDeviceOwner -> stringResource(R.string.change_error_hidden_by_device_owner)
     ChangeFailure.NotEnabledInSpace -> stringResource(R.string.change_error_not_enabled_in_space)
     ChangeFailure.NoRestorableCopy -> stringResource(R.string.change_error_no_restorable_copy)
     ChangeFailure.PostChangeStateUnverified -> stringResource(R.string.change_error_post_change_state_unverified)
