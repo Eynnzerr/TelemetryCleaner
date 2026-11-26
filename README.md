@@ -28,8 +28,8 @@ WiSec 2023 的流量测量还在部分国行样机上观察到运营商组件上
 
 Android 10 及以上设备可安装本项目。默认使用 Shizuku，已获取 Root 的设备可在首页选择「使用 Root」，也可在设置里切换权限来源。扫描后可选择空间、查看组件权限或批量操作。
 
-- **Shizuku** · 按 [Shizuku 启动指南](https://shizuku.rikka.app/guide/setup/)通过 ADB 或无线调试启动服务，再回到 App 授权。Android 11 及以上支持无线调试启动。
-- **Dhizuku 增强（可选，配合 Shizuku 使用）** · 若已安装并激活 [Dhizuku](https://github.com/iamr0s/Dhizuku)（设备所有者 / Device Owner），可在设置页的「权限来源」中开启「Dhizuku 增强」。当 Shizuku（UID 2000）被 ROM 拦截时，主空间（用户 0）将自动回落到 Dhizuku 代理的 `PackageInstaller` / `DevicePolicyManager` 接口继续尝试。 [Dhizuku 桥接实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/DhizukuBridge.kt)
+- **Shizuku**（[仓库](https://github.com/RikkaApps/Shizuku) · [下载最新 Release](https://github.com/RikkaApps/Shizuku/releases/latest)）· 按 [Shizuku 启动指南](https://shizuku.rikka.app/guide/setup/)通过 ADB 或无线调试启动服务，再回到 App 授权。Android 11 及以上支持无线调试启动。
+- **Dhizuku 增强（可选，配合 Shizuku 使用）**（[仓库](https://github.com/iamr0s/Dhizuku) · [下载最新 Release](https://github.com/iamr0s/Dhizuku/releases/latest)）· 若已安装并激活 Dhizuku（设备所有者 / Device Owner），可在设置页的「权限来源」中开启「Dhizuku 增强」。当 Shizuku（UID 2000）被 ROM 拦截时，主空间（用户 0）将自动回落到 Dhizuku 代理的 `PackageInstaller` / `DevicePolicyManager` 接口继续尝试。 [Dhizuku 桥接实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/DhizukuBridge.kt)
 - **Root** · 在 Root 管理器里授权 Telemetry Cleaner，回到首页连接 Root。扫描、卸载、恢复和自动清理通过 Root 会话执行，无需安装 Shizuku。
 
 ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系统包管理服务，避开部分 ROM 对 `pm` 命令行入口的拦截。系统包管理服务仍会执行本机的权限和包状态校验。 [Binder 调用实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/PackageBinder.kt)
@@ -70,6 +70,13 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 - [ ] 努比亚、国行三星、魅族运营商遥测组件包名收集
 - [ ] 扩充更多组件检测（包括厂商自己的敏感数据收集组件）作为可选项
 - [x] 为受 ROM 保护的组件增加可选的 Dhizuku（设备所有者）免 Root 增强通道
+
+## 致谢
+
+本项目的免 Root 能力依托以下优秀开源项目，感谢作者与维护者的贡献；未安装的用户可直接前往对应 Releases 页面下载：
+
+- **[Shizuku](https://github.com/RikkaApps/Shizuku)**（[下载 Releases](https://github.com/RikkaApps/Shizuku/releases/latest) · [Shizuku-API](https://github.com/RikkaApps/Shizuku-API) · [启动指南](https://shizuku.rikka.app/guide/setup/)）—— 提供免 Root 的 ADB / 无线调试 Binder 代理能力。
+- **[Dhizuku](https://github.com/iamr0s/Dhizuku)**（[下载 Releases](https://github.com/iamr0s/Dhizuku/releases/latest) · [Dhizuku-API](https://github.com/iamr0s/Dhizuku-API)）—— 提供 Device Owner 权限共享能力，用于增强处理受 ROM 保护的主空间组件。
 
 <a href="https://www.star-history.com/?repos=Eynnzerr%2FTelemetryCleaner&amp;type=date">
   <picture>
