@@ -1,0 +1,85 @@
+name: Bug 反馈 / 卸载异常
+description: 反馈应用闪退、扫描异常、卸载/冻结/恢复报错等可复现问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！如果只是咨询用法、分享正常卸载的机型实测结果或提出功能想法，请前往 [Discussions](https://github.com/Eynnzerr/TelemetryCleaner/discussions)。
+        提交前建议先查看 [机型实测与已知问题](https://github.com/Eynnzerr/TelemetryCleaner/blob/main/docs/user-feedback.md)。
+
+  - type: input
+    id: app_version
+    attributes:
+      label: App 版本
+      placeholder: 例如：v1.5.1
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: 机型与系统版本
+      description: 请尽量包含品牌型号、定制 ROM 版本与 Android 版本
+      placeholder: 例如：小米 15 Pro / HyperOS 3.0.309.0 / Android 16
+    validations:
+      required: true
+
+  - type: dropdown
+    id: privilege_mode
+    attributes:
+      label: 权限来源
+      options:
+        - Shizuku（无线调试 / ADB）
+        - Root（Magisk / KernelSU / APatch 等）
+        - Shizuku 与 Root 均已尝试
+        - 不涉及权限
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scenario
+    attributes:
+      label: 问题发生的环节
+      options:
+        - 权限连接（Shizuku / Root）
+        - 组件扫描 / 状态或权限显示
+        - 卸载 / 冻结 / 恢复操作
+        - 自动清理
+        - 应用闪退 / 界面异常
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述与复现步骤
+      description: 请说明你执行的操作（涉及的空间如主空间/分身/工作资料）、预期结果与实际现象
+      placeholder: |
+        1. 授权方式与目标空间：
+        2. 操作的组件包名：
+        3. 预期行为：
+        4. 实际结果：
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 错误日志与截图
+      description: 若操作失败，可在结果页点击「复制日志」并粘贴到此处，也可直接拖入截图
+      placeholder: 请粘贴错误日志或拖入相关截图
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已查看 [机型实测与已知问题](https://github.com/Eynnzerr/TelemetryCleaner/blob/main/docs/user-feedback.md)，确认不属于已知系统限制
+          required: true
+        - label: 已在最新 Release 版本复现该问题
+          required: false

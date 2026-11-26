@@ -14,7 +14,7 @@ TelemetryCleaner 可以检测国行 Android 固件预置的运营商组件，查
 1. 提供清单未覆盖的厂商+运营商+包名线索，在 README.md 中补充即可；
 2. 提供针对某模块的实测与分析报告，不限制是否为 AI 生成，但需保证真实性。放于 docs 目录中即可；
 3. ~协助实现未支持的免 Root 卸载功能（如**现版本不支持部分 vivo 系的电信/移动组件卸载**）~；
-4. 对软件功能的反馈或改进。
+4. 在 [Discussions](https://github.com/Eynnzerr/TelemetryCleaner/discussions) 或 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 提供功能反馈、实测体验与改进建议。
 
 ## 背景介绍
 
@@ -62,7 +62,7 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 
 本人只验证了 SystemHelper 和 OPPO 组件的卸载，小米、华为由网友验证实测。其他厂商因缺少设备暂未验证，如决定卸载，请自行承担风险。
 
-各厂商社区实测机型与已知问题整理见 [机型实测与使用反馈](docs/user-feedback.md)。欢迎在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 反馈某厂商某模块卸载后使用正常，也欢迎补充组件。附上机型、系统版本、包名和实际结果，便于复核。
+各厂商社区实测机型与已知问题整理见 [机型实测与使用反馈](docs/user-feedback.md)。欢迎在 [Discussions](https://github.com/Eynnzerr/TelemetryCleaner/discussions) 分享机型实测结果、使用提问或功能讨论；如遇到 Bug 或有未收录的新组件包名线索，请在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 提交。反馈时请尽量附上机型、系统版本、包名和实际结果，便于复核。
 
 ## WIP
 
