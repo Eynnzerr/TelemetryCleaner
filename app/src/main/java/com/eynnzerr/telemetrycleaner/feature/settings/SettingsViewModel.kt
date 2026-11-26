@@ -2,8 +2,10 @@ package com.eynnzerr.telemetrycleaner.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.eynnzerr.telemetrycleaner.data.DhizukuStatus
 import com.eynnzerr.telemetrycleaner.data.ReleaseCheckResult
 import com.eynnzerr.telemetrycleaner.data.checkLatestRelease
+import com.eynnzerr.telemetrycleaner.data.packagemanager.DhizukuController
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerPreferences
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
@@ -25,6 +27,7 @@ import kotlinx.coroutines.launch
 internal data class SettingsUiState(
     val preferences: CleanerPreferences? = null,
     val autoCleanupStatus: AutoCleanupStatus = AutoCleanupStatus.OFF,
+    val dhizukuStatus: DhizukuStatus = DhizukuStatus.MISSING,
     val checkingForUpdate: Boolean = false,
     val releaseResult: ReleaseCheckResult? = null,
 ) {
@@ -40,8 +43,8 @@ internal data class SettingsUiState(
     val autoCleanupIntervalMinutes: Int
         get() = preferences?.autoCleanupIntervalMinutes ?: DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES
 
-    val disableOnUninstallFailure: Boolean?
-        get() = preferences?.disableOnUninstallFailure
+    val dhizukuFallbackEnabled: Boolean?
+        get() = preferences?.dhizukuFallbackEnabled
 }
 
 /** Platform side effects requested by [SettingsViewModel] that require an Activity context. */
@@ -56,6 +59,7 @@ internal sealed interface SettingsEvent {
  */
 internal class SettingsViewModel(
     private val settings: CleanerSettings,
+    private val dhizuku: DhizukuController? = null,
 ) : ViewModel() {
     private val eventChannel = Channel<SettingsEvent>(Channel.BUFFERED)
 
@@ -78,31 +82,59 @@ internal class SettingsViewModel(
 
     private val checkingForUpdate = MutableStateFlow(false)
     private val releaseResult = MutableStateFlow<ReleaseCheckResult?>(null)
+    private val dhizukuStatusFlow: StateFlow<DhizukuStatus> =
+        dhizuku?.status ?: MutableStateFlow(DhizukuStatus.MISSING)
 
     val state: StateFlow<SettingsUiState> = combine(
         settings.preferences,
         settings.autoCleanupStatus,
+        dhizukuStatusFlow,
         checkingForUpdate,
         releaseResult,
-    ) { preferences, status, checking, release ->
+    ) { preferences, status, dhizukuStatus, checking, release ->
         SettingsUiState(
             preferences = preferences,
             autoCleanupStatus = status,
+            dhizukuStatus = dhizukuStatus,
             checkingForUpdate = checking,
             releaseResult = release,
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = SettingsUiState(autoCleanupStatus = settings.autoCleanupStatus.value),
+        initialValue = SettingsUiState(
+            autoCleanupStatus = settings.autoCleanupStatus.value,
+            dhizukuStatus = dhizukuStatusFlow.value,
+        ),
     )
 
-    /** Saves whether a failed manual uninstall may fall back to disabling the package. */
-    fun setDisableOnUninstallFailure(enabled: Boolean) {
+    /** Enables or disables the optional Dhizuku enhancement channel in Shizuku mode. */
+    fun setDhizukuFallbackEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            if (!settings.setDisableOnUninstallFailure(enabled)) {
+            if (!settings.setDhizukuFallbackEnabled(enabled)) {
                 eventChannel.send(SettingsEvent.SaveFailed)
+                return@launch
             }
+            if (enabled) {
+                val currentStatus = dhizuku?.refreshStatus()
+                if (currentStatus == DhizukuStatus.PERMISSION_REQUIRED) {
+                    dhizuku?.requestPermission()
+                }
+            }
+        }
+    }
+
+    /** Refreshes Dhizuku availability and authorization status without prompting. */
+    fun refreshDhizukuStatus() {
+        viewModelScope.launch {
+            dhizuku?.refreshStatus()
+        }
+    }
+
+    /** Triggers Dhizuku's permission request dialog when an active server awaits approval. */
+    fun requestDhizukuPermission() {
+        viewModelScope.launch {
+            dhizuku?.requestPermission()
         }
     }
 

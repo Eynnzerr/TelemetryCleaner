@@ -22,8 +22,7 @@ internal object PackageDiagnostics {
         startedAt: Long,
         attempt: Result<PackageShellResult>,
         fallback: PackageFallbackResult?,
-        disableAttempt: Result<PackageShellResult>?,
-        afterDisable: PackageState?,
+        dhizukuUninstall: PackageFallbackResult? = null,
         submitDeniedOnRetry: Boolean = false,
     ): String = buildString {
         appendLine("Time: ${Instant.ofEpochMilli(startedAt)}")
@@ -42,9 +41,10 @@ internal object PackageDiagnostics {
             appendLine("Helper: $status")
             appendLine(fallback.detail)
         }
-        if (disableAttempt != null) {
-            appendAttempt("Disable fallback", disableAttempt)
-            appendLine("State after disable request: ${afterDisable ?: "unknown"}")
+        if (dhizukuUninstall != null) {
+            val status = if (dhizukuUninstall.submitted) "submitted, removal not confirmed" else "not completed"
+            appendLine("Dhizuku uninstall: $status")
+            appendLine(dhizukuUninstall.detail)
         }
         executor.systemLog(target.packageName, startedAt)?.let { log ->
             appendLine("Related system log:")

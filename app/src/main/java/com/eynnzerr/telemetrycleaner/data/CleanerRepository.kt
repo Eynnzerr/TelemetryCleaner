@@ -9,6 +9,7 @@ import android.os.UserHandle
 import android.os.UserManager
 import androidx.annotation.MainThread
 import com.eynnzerr.telemetrycleaner.BuildConfig
+import com.eynnzerr.telemetrycleaner.data.packagemanager.DhizukuBridge
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageCommands
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageFallback
 import com.eynnzerr.telemetrycleaner.data.packagemanager.PackageFallbackResult
@@ -85,6 +86,7 @@ class CleanerRepository internal constructor(
     context: Context,
     private val settings: CleanerSettings,
     private val sessionManager: PrivilegeSessionManager,
+    private val dhizukuBridge: DhizukuBridge,
 ) {
     private val appContext = context.applicationContext
 
@@ -179,17 +181,17 @@ class CleanerRepository internal constructor(
         return PackageEntry(packageName, label ?: packageName, emptySet())
     }
 
-    /** Applies the confirmed manual actions serially, optionally trying to disable retained packages. */
+    /** Applies the confirmed manual actions serially. */
     suspend fun change(
         targets: List<ChangeTarget>,
         action: PackageAction,
-        disableOnUninstallFailure: Boolean = true,
         expectedBackend: PrivilegeBackend? = null,
     ): List<ChangeOutcome> =
         sessionManager.withPackageCommands { commands, backend ->
             check(expectedBackend == null || expectedBackend == backend)
             customPackagesMutex.withLock {
-                val managedNames = PackageDirectory.variants.keys + settings.readPreferences().customPackageNames
+                val preferences = settings.readPreferences()
+                val managedNames = PackageDirectory.variants.keys + preferences.customPackageNames
                 targets.distinct().map { target ->
                     currentCoroutineContext().ensureActive()
                     if (target.packageName !in managedNames) {
@@ -204,7 +206,7 @@ class CleanerRepository internal constructor(
                         target = target,
                         action = action,
                         requireVerifiedSystemIdentity = false,
-                        disableOnUninstallFailure = disableOnUninstallFailure,
+                        dhizukuFallbackEnabled = preferences.dhizukuFallbackEnabled,
                         submitDeniedFailure = ChangeFailure.SpaceStateUnverified,
                         canSubmit = {
                             val expectedSerial = target.userSerialNumber
@@ -215,7 +217,9 @@ class CleanerRepository internal constructor(
                     if (denialLog == null) {
                         outcome
                     } else {
-                        outcome.copy(denialLog = denialContext(target, backend) + denialLog)
+                        outcome.copy(
+                            denialLog = denialContext(target, backend, preferences.dhizukuFallbackEnabled) + denialLog,
+                        )
                     }
                 }
             }
@@ -229,12 +233,13 @@ class CleanerRepository internal constructor(
         sessionManager.withPackageCommands { commands, backend ->
             check(backend == expectedBackend)
             val operationContext = currentCoroutineContext()
-            if (!settings.readPreferences().autoCleanupEnabled) {
+            val initialPreferences = settings.readPreferences()
+            if (!initialPreferences.autoCleanupEnabled) {
                 return@withPackageCommands AutoCleanupResult(hasSpaces = false, outcomes = emptyList())
             }
             val snapshot = scanPackages(commands, PackageDirectory.autoCleanupNames.map(PackageDirectory.variants::getValue))
             val users = snapshot.users.associateBy(AndroidUser::id)
-            val spaces = settings.readPreferences().selectedUsers(snapshot)
+            val spaces = initialPreferences.selectedUsers(snapshot)
             val targets = snapshot.targetsFor(
                 action = PackageAction.UNINSTALL,
                 selectedUserIds = spaces,
@@ -249,7 +254,13 @@ class CleanerRepository internal constructor(
                     operationContext.ensureActive()
                     val user = users.getValue(target.userId)
                     var allowedToSubmit: Boolean? = null
-                    val outcome = changePackage(commands, backend, target, PackageAction.UNINSTALL) {
+                    val outcome = changePackage(
+                        commands = commands,
+                        backend = backend,
+                        target = target,
+                        action = PackageAction.UNINSTALL,
+                        dhizukuFallbackEnabled = initialPreferences.dhizukuFallbackEnabled,
+                    ) {
                         val serial = userSerialNumber(user.id)
                         operationContext.ensureActive()
                         val latest = settings.readPreferences()
@@ -302,22 +313,40 @@ class CleanerRepository internal constructor(
         target: ChangeTarget,
         action: PackageAction,
         requireVerifiedSystemIdentity: Boolean = true,
-        disableOnUninstallFailure: Boolean = false,
+        dhizukuFallbackEnabled: Boolean = false,
         submitDeniedFailure: ChangeFailure? = null,
         canSubmit: suspend () -> Boolean = { true },
     ): ChangeOutcome = try {
         if (backend == PrivilegeBackend.SHIZUKU && !sessionManager.isShizukuBinderAlive()) {
             ChangeOutcome(target, false, ChangeFailure.ShizukuDisconnected)
         } else {
+            val currentUserId = Process.myUid() / PER_USER_RANGE
+            val isMainSpaceShizuku = backend == PrivilegeBackend.SHIZUKU && target.userId == currentUserId
+            val allowDhizukuFallback = isMainSpaceShizuku && dhizukuFallbackEnabled
+            val allowDhizukuUnhide = action == PackageAction.RESTORE &&
+                isMainSpaceShizuku &&
+                (dhizukuFallbackEnabled || dhizukuBridge.isReadyNow())
             commands.change(
                 target = target,
                 action = action,
                 requireVerifiedSystemIdentity = requireVerifiedSystemIdentity,
                 captureDenialLog = !requireVerifiedSystemIdentity && action == PackageAction.UNINSTALL,
-                disableOnUninstallFailure = disableOnUninstallFailure,
                 canSubmit = canSubmit,
                 submitDeniedFailure = submitDeniedFailure,
                 deleteThroughAppProcess = if (backend == PrivilegeBackend.SHIZUKU) ::uninstallThroughShizuku else null,
+                deleteThroughDhizuku = if (allowDhizukuFallback) dhizukuBridge::uninstall else null,
+                hideThroughDhizuku = if (allowDhizukuFallback) { pkg, uid ->
+                    dhizukuBridge.setApplicationHidden(pkg, uid, hidden = true)
+                } else {
+                    null
+                },
+                unhideThroughDhizuku = if (allowDhizukuUnhide) { pkg, uid ->
+                    dhizukuBridge.setApplicationHidden(pkg, uid, hidden = false)
+                } else {
+                    null
+                },
+                installExistingThroughDhizuku = if (allowDhizukuFallback) dhizukuBridge::installExistingPackage else null,
+                allowShellUnhide = backend == PrivilegeBackend.ROOT,
             )
         }
     } catch (_: SecurityException) {
@@ -338,7 +367,11 @@ class CleanerRepository internal constructor(
             ?: PackageFallbackResult(false, "Helper APK unavailable")
 
     /** Adds the device, caller and effective restriction needed to interpret a denial. */
-    private fun denialContext(target: ChangeTarget, backend: PrivilegeBackend): String = buildString {
+    private fun denialContext(
+        target: ChangeTarget,
+        backend: PrivilegeBackend,
+        dhizukuFallbackEnabled: Boolean,
+    ): String = buildString {
         val handle = UserHandle.getUserHandleForUid(target.userId * PER_USER_RANGE)
         val noUninstallApps = runCatching {
             userManager?.getUserRestrictions(handle)?.getBoolean(UserManager.DISALLOW_UNINSTALL_APPS)
@@ -348,6 +381,12 @@ class CleanerRepository internal constructor(
         appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}")
         appendLine("Build: ${Build.DISPLAY} (${Build.FINGERPRINT})")
         appendLine("Backend: ${backend.name}, UID: ${uid ?: "unknown"}")
+        if (backend == PrivilegeBackend.SHIZUKU) {
+            appendLine(
+                "Dhizuku enhancement: enabled=$dhizukuFallbackEnabled, status=${dhizukuBridge.status.value}, " +
+                    "owner=${dhizukuBridge.ownerPackageNameOrNull() ?: "none"}",
+            )
+        }
         appendLine("Effective no_uninstall_apps for user ${target.userId}: ${noUninstallApps ?: "unknown"}")
     }
 

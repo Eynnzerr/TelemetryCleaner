@@ -2,6 +2,7 @@ package com.eynnzerr.telemetrycleaner.feature.cleaner
 
 import com.eynnzerr.telemetrycleaner.data.AndroidUser
 import com.eynnzerr.telemetrycleaner.data.Carrier
+import com.eynnzerr.telemetrycleaner.data.ChangeFailure
 import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
 import com.eynnzerr.telemetrycleaner.data.ChangeTarget
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
@@ -15,6 +16,7 @@ import com.eynnzerr.telemetrycleaner.data.PrivilegeStatus
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -288,5 +290,43 @@ class CleanerReducerTest {
         assertEquals(CleanerActivity.IDLE, transition.state.activity)
         assertEquals(CleanerError.BACKEND_SELECTION_FAILED, transition.state.error)
         assertTrue(transition.effects.isEmpty())
+    }
+
+    @Test
+    fun resultsPanel_needsDhizukuNoticeOnlyForRelevantMainSpaceShizukuFailures() {
+        val mainTarget = ChangeTarget(bundledEntry.packageName, 0)
+        val cloneTarget = ChangeTarget(bundledEntry.packageName, 10)
+
+        val mainDenied = CleanerPanel.Results(
+            PackageAction.UNINSTALL,
+            listOf(ChangeOutcome(mainTarget, false, ChangeFailure.SystemError("Failure [DELETE_FAILED_INTERNAL_ERROR]"))),
+        )
+        assertTrue(mainDenied.needsDhizukuNotice(PrivilegeBackend.SHIZUKU, currentUserId = 0, dhizukuFallbackEnabled = true))
+        assertFalse(mainDenied.needsDhizukuNotice(PrivilegeBackend.SHIZUKU, currentUserId = 0, dhizukuFallbackEnabled = false))
+        assertFalse(mainDenied.needsDhizukuNotice(PrivilegeBackend.ROOT, currentUserId = 0, dhizukuFallbackEnabled = true))
+
+        val cloneOnlyDenied = CleanerPanel.Results(
+            PackageAction.UNINSTALL,
+            listOf(ChangeOutcome(cloneTarget, false, ChangeFailure.SystemError("Failure [DELETE_FAILED_INTERNAL_ERROR]"))),
+        )
+        assertFalse(cloneOnlyDenied.needsDhizukuNotice(PrivilegeBackend.SHIZUKU, currentUserId = 0, dhizukuFallbackEnabled = true))
+
+        val preflightDenied = CleanerPanel.Results(
+            PackageAction.UNINSTALL,
+            listOf(ChangeOutcome(mainTarget, false, ChangeFailure.ProtectedSystemPackage)),
+        )
+        assertFalse(preflightDenied.needsDhizukuNotice(PrivilegeBackend.SHIZUKU, currentUserId = 0, dhizukuFallbackEnabled = true))
+
+        val succeeded = CleanerPanel.Results(
+            PackageAction.UNINSTALL,
+            listOf(ChangeOutcome(mainTarget, true, null)),
+        )
+        assertFalse(succeeded.needsDhizukuNotice(PrivilegeBackend.SHIZUKU, currentUserId = 0, dhizukuFallbackEnabled = true))
+
+        val hiddenRestore = CleanerPanel.Results(
+            PackageAction.RESTORE,
+            listOf(ChangeOutcome(mainTarget, false, ChangeFailure.HiddenByDeviceOwner)),
+        )
+        assertTrue(hiddenRestore.needsDhizukuNotice(PrivilegeBackend.SHIZUKU, currentUserId = 0, dhizukuFallbackEnabled = false))
     }
 }

@@ -51,6 +51,7 @@ class PackageDirectoryValidationTest {
             "cn.nubia.launcher",
             "com.android.shell",
             "moe.shizuku.privileged.api",
+            "com.rosan.dhizuku",
             BuildConfig.APPLICATION_ID,
         )
         for (name in criticalSamples) {
@@ -63,6 +64,10 @@ class PackageDirectoryValidationTest {
         assertEquals(
             AddCustomPackageStatus.AlreadyBundled,
             validateCustomPackageInput("com.mobiletools.systemhelper", emptySet()),
+        )
+        assertEquals(
+            AddCustomPackageStatus.AlreadyBundled,
+            validateCustomPackageInput("com.oplus.olc", emptySet()),
         )
         assertEquals(
             AddCustomPackageStatus.AlreadyAdded,
@@ -82,7 +87,6 @@ class PackageDirectoryValidationTest {
             "com.oplus.safecenter",
             "com.oplus.statistics.rom",
             "com.coloros.activation",
-            "com.oplus.olc",
             "com.iqoo.secure",
             "com.huawei.systemmanager",
             "com.huawei.hwid",

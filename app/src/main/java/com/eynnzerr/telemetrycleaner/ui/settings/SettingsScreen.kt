@@ -16,12 +16,14 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
+import com.eynnzerr.telemetrycleaner.data.DhizukuStatus
 import com.eynnzerr.telemetrycleaner.data.PrivilegeBackend
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.ThemePalette
@@ -33,13 +35,16 @@ import com.eynnzerr.telemetrycleaner.ui.components.LargeBackTopAppBar
 internal fun SettingsScreen(
     state: CleanerState,
     onSelectBackend: (PrivilegeBackend) -> Unit,
+    dhizukuFallbackEnabled: Boolean?,
+    dhizukuStatus: DhizukuStatus,
+    onDhizukuFallbackChange: (Boolean) -> Unit,
+    onRequestDhizukuPermission: () -> Unit,
+    onRefreshDhizukuStatus: () -> Unit,
     autoCleanupEnabled: Boolean?,
     autoCleanupStatus: AutoCleanupStatus,
     autoCleanupIntervalMinutes: Int,
     onAutoCleanupChange: (Boolean) -> Unit,
     onAutoCleanupIntervalChange: (Int) -> Unit,
-    disableOnUninstallFailure: Boolean?,
-    onDisableOnUninstallFailureChange: (Boolean) -> Unit,
     onToggleSpace: (Int) -> Unit,
     onOpenAutoCleanupHistory: () -> Unit,
     onOpenPackageDirectory: () -> Unit,
@@ -51,6 +56,9 @@ internal fun SettingsScreen(
     onOpenProject: () -> Unit,
     onBack: () -> Unit,
 ) {
+    LaunchedEffect(Unit) {
+        onRefreshDhizukuStatus()
+    }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -75,11 +83,17 @@ internal fun SettingsScreen(
                     ),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                PrivilegeBackendSettings(state, onSelectBackend)
+                PrivilegeBackendSettings(
+                    state = state,
+                    onSelect = onSelectBackend,
+                    dhizukuFallbackEnabled = dhizukuFallbackEnabled,
+                    dhizukuStatus = dhizukuStatus,
+                    onDhizukuFallbackChange = onDhizukuFallbackChange,
+                    onRequestDhizukuPermission = onRequestDhizukuPermission,
+                    onRefreshDhizukuStatus = onRefreshDhizukuStatus,
+                )
                 ScopeSettings(state, onToggleSpace)
                 CleanupSettings(
-                    disableOnUninstallFailure = disableOnUninstallFailure,
-                    onDisableOnUninstallFailureChange = onDisableOnUninstallFailureChange,
                     enabled = autoCleanupEnabled,
                     status = autoCleanupStatus,
                     intervalMinutes = autoCleanupIntervalMinutes,

@@ -155,9 +155,7 @@ internal class CleanerViewModel(
     private suspend fun change(effect: CleanerEffect.Change) {
         val (action, targets) = effect.confirmation
         val message = try {
-            val disableOnUninstallFailure = action == PackageAction.UNINSTALL &&
-                settings.readPreferences().disableOnUninstallFailure
-            val outcomes = repository.change(targets, action, disableOnUninstallFailure, expectedBackend = effect.backend)
+            val outcomes = repository.change(targets, action, expectedBackend = effect.backend)
             CleanerMessage.ChangeFinished(effect.id, action, outcomes, requestFailed = false)
         } catch (_: Exception) {
             currentCoroutineContext().ensureActive()

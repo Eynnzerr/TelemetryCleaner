@@ -3,6 +3,8 @@ package com.eynnzerr.telemetrycleaner.feature.settings
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
+import com.eynnzerr.telemetrycleaner.data.DhizukuStatus
+import com.eynnzerr.telemetrycleaner.data.packagemanager.DhizukuController
 import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.CleanerSettings
 import com.eynnzerr.telemetrycleaner.service.AutoCleanupStartCoordinator
@@ -436,4 +438,43 @@ class SettingsViewModelTest {
                 serviceScope.cancel()
             }
         }
+
+    @Test
+    fun setDhizukuFallbackEnabled_persistsAndRequestsPermissionWhenRequired() = runTest(testDispatcher) {
+        val store = ControllablePreferencesDataStore()
+        val settings = CleanerSettings(store, logWarning = { _, _ -> })
+        val statusFlow = MutableStateFlow(DhizukuStatus.INACTIVE)
+        var refreshCount = 0
+        var requestCount = 0
+        val fakeDhizuku = object : DhizukuController {
+            override val status = statusFlow
+            override suspend fun refreshStatus(): DhizukuStatus {
+                refreshCount += 1
+                statusFlow.value = DhizukuStatus.PERMISSION_REQUIRED
+                return statusFlow.value
+            }
+
+            override suspend fun requestPermission(): DhizukuStatus {
+                requestCount += 1
+                statusFlow.value = DhizukuStatus.READY
+                return statusFlow.value
+            }
+        }
+        val viewModel = SettingsViewModel(settings, fakeDhizuku)
+
+        viewModel.setDhizukuFallbackEnabled(true)
+        advanceUntilIdle()
+
+        assertTrue(settings.readPreferences().dhizukuFallbackEnabled)
+        assertEquals(1, refreshCount)
+        assertEquals(1, requestCount)
+        assertEquals(DhizukuStatus.READY, fakeDhizuku.status.value)
+
+        viewModel.setDhizukuFallbackEnabled(false)
+        advanceUntilIdle()
+
+        assertFalse(settings.readPreferences().dhizukuFallbackEnabled)
+        assertEquals(1, refreshCount)
+        assertEquals(1, requestCount)
+    }
 }

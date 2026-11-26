@@ -29,15 +29,16 @@ WiSec 2023 的流量测量还在部分国行样机上观察到运营商组件上
 Android 10 及以上设备可安装本项目。默认使用 Shizuku，已获取 Root 的设备可在首页选择「使用 Root」，也可在设置里切换权限来源。扫描后可选择空间、查看组件权限或批量操作。
 
 - **Shizuku** · 按 [Shizuku 启动指南](https://shizuku.rikka.app/guide/setup/)通过 ADB 或无线调试启动服务，再回到 App 授权。Android 11 及以上支持无线调试启动。
+- **Dhizuku 增强（可选，配合 Shizuku 使用）** · 若已安装并激活 [Dhizuku](https://github.com/iamr0s/Dhizuku)（设备所有者 / Device Owner），可在设置页的「权限来源」中开启「Dhizuku 增强」。当 Shizuku（UID 2000）被 ROM 拦截时，主空间（用户 0）将自动回落到 Dhizuku 代理的 `PackageInstaller` / `DevicePolicyManager` 接口继续尝试。 [Dhizuku 桥接实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/DhizukuBridge.kt)
 - **Root** · 在 Root 管理器里授权 Telemetry Cleaner，回到首页连接 Root。扫描、卸载、恢复和自动清理通过 Root 会话执行，无需安装 Shizuku。
 
 ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系统包管理服务，避开部分 ROM 对 `pm` 命令行入口的拦截。系统包管理服务仍会执行本机的权限和包状态校验。 [Binder 调用实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/PackageBinder.kt)
 
-少数 ROM 会在命令层拒绝卸载系统应用，例如返回 `Failure [only root can delete system app for a particular user]`。Shizuku 模式可通过 `app_process` 调用 `IPackageManager.deletePackageAsUser` 再试一次。App 回读包状态确认结果，失败时结果页保留原始系统错误。 [app_process 兜底实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/PackageFallback.kt)
+少数 ROM 会在命令层拒绝卸载系统应用，例如返回 `Failure [only root can delete system app for a particular user]`。Shizuku 模式可通过 `app_process` 调用 `IPackageManager.deletePackageAsUser` 再试一次；若开启了「Dhizuku 增强」，在 shell 身份仍被拦截时还会进一步通过 Device Owner 通道尝试（进入 PMS 时身份切换为 `UID 1000` 并携带 `DELETE_SYSTEM_APP`，已在未 Root ColorOS 16 真机实测通过 `com.oplus.olc` 卸载与恢复，详见 [OLC 保护分析](docs/reports/oplus-olc-protection.md)）。App 回读包状态确认结果，失败时结果页保留原始系统错误。 [app_process 兜底实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/PackageFallback.kt)
 
 卸载按选定空间执行，会清除该空间中的组件数据。恢复使用系统保留的 APK。自动清理默认关闭，开启后按配置的周期检查所选空间，只处理自动清理名单内的组件。使用 Root 时，设备重启或 App 进程退出后，需在首页重新连接 Root 才会继续自动清理。
 
-**已知限制：vivo OriginOS 的 PMS 底层中，电信/移动组件 com.vivo.devicereg 被列入了 vivo 系统保护名单，暂无法在非 Root 情况下完成卸载。其他厂商经实测反馈均支持。**
+**已知限制：vivo OriginOS 的 `com.vivo.devicereg`、ColorOS 的 `com.oplus.olc` 等受系统保护组件在纯 Shizuku（UID 2000）下会被拦截，需开启可选的「Dhizuku 增强」（仅主空间用户 0）或使用 Root；其中 `com.vivo.devicereg` 的 Dhizuku 路径仍欢迎社区实测反馈。**
 
 ## 内置组件清单
 
@@ -50,7 +51,7 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 | OPPO / 一加 / realme | 移动 | `com.coloros.regservice` | 已实测 |
 | 小米 / Redmi / POCO | 电信 | `com.xiaomi.registration` | 已实测 |
 | 小米 / Redmi / POCO | 移动 | `com.miui.dmregservice` | 已实测 |
-| vivo | 移动 / 电信 | `com.vivo.devicereg` | 暂不支持 |
+| vivo | 移动 / 电信 | `com.vivo.devicereg` | 需 Root / Dhizuku（待验证） |
 | 华为及旧荣耀 | 电信（数据） | `com.huawei.android.UEInfoCheck` | 已实测 |
 | 华为及旧荣耀 | 电信（短信） | `com.huawei.android.AutoRegSms` | 已实测 |
 | 华为 | 移动 | `com.huawei.regservice` | 已实测 |
@@ -68,7 +69,7 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 
 - [ ] 努比亚、国行三星、魅族运营商遥测组件包名收集
 - [ ] 扩充更多组件检测（包括厂商自己的敏感数据收集组件）作为可选项
-- [x] 部分 vivo 系不支持卸载 SystemHelper 外的组件。暂提供冻结策略作为兜底
+- [x] 为受 ROM 保护的组件增加可选的 Dhizuku（设备所有者）免 Root 增强通道
 
 <a href="https://www.star-history.com/?repos=Eynnzerr%2FTelemetryCleaner&amp;type=date">
   <picture>

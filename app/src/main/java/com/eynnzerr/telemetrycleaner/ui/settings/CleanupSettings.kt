@@ -36,11 +36,9 @@ import com.eynnzerr.telemetrycleaner.data.preferences.AutoCleanupStatus
 import com.eynnzerr.telemetrycleaner.data.preferences.label
 import com.eynnzerr.telemetrycleaner.ui.theme.TelemetryCleanerTheme
 
-/** Groups manual uninstall fallback and automatic cleanup settings into a 4-item Segmented List. */
+/** Groups automatic cleanup settings into a 3-item Segmented List. */
 @Composable
 internal fun CleanupSettings(
-    disableOnUninstallFailure: Boolean?,
-    onDisableOnUninstallFailureChange: (Boolean) -> Unit,
     enabled: Boolean?,
     status: AutoCleanupStatus,
     intervalMinutes: Int,
@@ -49,33 +47,27 @@ internal fun CleanupSettings(
     onOpenHistory: () -> Unit,
 ) {
     SettingsGroup(stringResource(R.string.settings_group_cleanup)) {
-        DisableOnUninstallFailureSetting(
-            enabled = disableOnUninstallFailure,
-            index = 0,
-            count = 4,
-            onEnabledChange = onDisableOnUninstallFailureChange,
-        )
         AutoCleanupSettings(
             enabled = enabled,
             status = status,
             intervalMinutes = intervalMinutes,
-            index = 1,
-            count = 4,
+            index = 0,
+            count = 3,
             onEnabledChange = onEnabledChange,
         )
         AutoCleanupIntervalSettings(
             enabled = enabled == true,
             intervalMinutes = intervalMinutes,
-            index = 2,
-            count = 4,
+            index = 1,
+            count = 3,
             onIntervalChange = onIntervalChange,
         )
         SettingsLink(
             icon = R.drawable.ic_settings_history,
             title = R.string.auto_cleanup_history_title,
             description = R.string.settings_history_description,
-            index = 3,
-            count = 4,
+            index = 2,
+            count = 3,
             enabled = enabled == true,
             onClick = onOpenHistory,
         )
@@ -100,34 +92,6 @@ private fun ExpressiveSwitch(checked: Boolean, enabled: Boolean) {
         } else {
             null
         },
-    )
-}
-
-/** Lets the user control the disable fallback for manual uninstall. */
-@Composable
-private fun DisableOnUninstallFailureSetting(
-    enabled: Boolean?,
-    index: Int,
-    count: Int,
-    onEnabledChange: (Boolean) -> Unit,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    SettingsItem(
-        icon = R.drawable.ic_settings_check,
-        title = stringResource(R.string.settings_disable_on_uninstall_failure),
-        index = index,
-        count = count,
-        interactionSource = interactionSource,
-        modifier = Modifier.toggleable(
-            value = enabled == true,
-            enabled = enabled != null,
-            role = Role.Switch,
-            interactionSource = interactionSource,
-            indication = ripple(),
-            onValueChange = onEnabledChange,
-        ),
-        supportingContent = { Text(stringResource(R.string.settings_disable_on_uninstall_failure_description)) },
-        trailingContent = { ExpressiveSwitch(checked = enabled == true, enabled = enabled != null) },
     )
 }
 

@@ -39,7 +39,7 @@ internal const val DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES = 30
  * @property selectedUserSerials Explicitly selected profile serials, or null for the app's current space.
  * @property themePalette The saved color palette for the app.
  * @property autoCleanupIntervalMinutes The number of minutes between automatic checks.
- * @property disableOnUninstallFailure Whether a failed manual uninstall may fall back to disabling the package.
+ * @property dhizukuFallbackEnabled Whether Shizuku mode may use an authorized Dhizuku Device Owner bridge as fallback.
  * @property privilegeBackend The authorization method to use for package operations.
  * @property customPackageNames Additional package names the user chose for manual management.
  */
@@ -48,7 +48,7 @@ internal data class CleanerPreferences(
     val selectedUserSerials: Set<Long>?,
     val themePalette: ThemePalette = ThemePalette.SYSTEM,
     val autoCleanupIntervalMinutes: Int = DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES,
-    val disableOnUninstallFailure: Boolean = true,
+    val dhizukuFallbackEnabled: Boolean = false,
     val privilegeBackend: PrivilegeBackend = PrivilegeBackend.SHIZUKU,
     val customPackageNames: Set<String> = emptySet(),
 ) {
@@ -86,7 +86,7 @@ internal class CleanerSettings(
                     ?: ThemePalette.SYSTEM,
                 autoCleanupIntervalMinutes = saved[AUTO_CLEANUP_INTERVAL_MINUTES]?.takeIf { it > 0 }
                     ?: DEFAULT_AUTO_CLEANUP_INTERVAL_MINUTES,
-                disableOnUninstallFailure = saved[DISABLE_ON_UNINSTALL_FAILURE] ?: true,
+                dhizukuFallbackEnabled = saved[DHIZUKU_FALLBACK_ENABLED] ?: false,
                 privilegeBackend = if (saved[PRIVILEGE_BACKEND] == PrivilegeBackend.ROOT.name) {
                     PrivilegeBackend.ROOT
                 } else {
@@ -102,7 +102,6 @@ internal class CleanerSettings(
                 CleanerPreferences(
                     autoCleanupEnabled = false,
                     selectedUserSerials = emptySet(),
-                    disableOnUninstallFailure = false,
                 ),
             )
         }
@@ -140,9 +139,9 @@ internal class CleanerSettings(
             if (saved) clearAutoCleanupSaveFailure()
         }
 
-    /** Saves the preference for disabling a package after a failed manual uninstall. */
-    suspend fun setDisableOnUninstallFailure(enabled: Boolean): Boolean =
-        save { it[DISABLE_ON_UNINSTALL_FAILURE] = enabled }
+    /** Saves whether Shizuku mode may fall back to Dhizuku for protected main-space packages. */
+    suspend fun setDhizukuFallbackEnabled(enabled: Boolean): Boolean =
+        save { it[DHIZUKU_FALLBACK_ENABLED] = enabled }
 
     /** Saves the backend selected by the user. */
     suspend fun setPrivilegeBackend(backend: PrivilegeBackend): Boolean =
@@ -213,8 +212,8 @@ internal class CleanerSettings(
         /** The user's opt-in to automatic removal. */
         val AUTO_CLEANUP_ENABLED = booleanPreferencesKey("auto_cleanup_enabled")
 
-        /** Whether to try disabling a package when manual uninstall fails. */
-        val DISABLE_ON_UNINSTALL_FAILURE = booleanPreferencesKey("disable_on_uninstall_failure")
+        /** Whether Shizuku mode may fall back to Dhizuku for protected main-space packages. */
+        val DHIZUKU_FALLBACK_ENABLED = booleanPreferencesKey("dhizuku_fallback_enabled")
 
         /** The selected authorization method. */
         val PRIVILEGE_BACKEND = stringPreferencesKey("privilege_backend")
