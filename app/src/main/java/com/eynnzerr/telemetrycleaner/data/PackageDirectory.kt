@@ -29,6 +29,7 @@ internal object PackageDirectory {
         PackageFamily.COLOR_OS to listOf(
             PackageEntry("com.oppo.ctautoregist", "CTAutoRegist", setOf(Carrier.TELECOM)),
             PackageEntry("com.coloros.regservice", "RegService", setOf(Carrier.MOBILE)),
+            PackageEntry("com.oplus.olc", "OLC", emptySet()),
             PackageEntry("com.oplus.statistics.rom", "User Experience Program", emptySet()),
             PackageEntry("com.nearme.statistics.rom", "User Experience Program (legacy)", emptySet()),
             PackageEntry("com.nearme.deamon", "Statistics Daemon", emptySet()),
@@ -40,6 +41,7 @@ internal object PackageDirectory {
             PackageEntry("com.xiaomi.security.onetrack", "SecurityOnetrackService", emptySet()),
             PackageEntry("com.miui.misightservice", "MiSightService", emptySet()),
             PackageEntry("com.miui.analytics", "Analytics", emptySet()),
+            PackageEntry("com.miui.systemAdSolution", "MSA", emptySet()),
             PackageEntry("com.miui.spock", "Spock Analytics", emptySet()),
             PackageEntry("android.romstats", "ROM Stats", emptySet()),
             PackageEntry("com.xiaomi.aon", "AON Service", emptySet()),

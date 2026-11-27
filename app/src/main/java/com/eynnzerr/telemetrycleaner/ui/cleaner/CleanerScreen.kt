@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.Carrier
+import com.eynnzerr.telemetrycleaner.data.DhizukuStatus
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
 import com.eynnzerr.telemetrycleaner.data.PackageFamily
@@ -53,6 +54,10 @@ fun CleanerScreen(
     customPackageNames: Set<String>,
     onRemoveCustomPackage: (String) -> Unit,
     modifier: Modifier = Modifier,
+    dhizukuFallbackEnabled: Boolean = false,
+    dhizukuStatus: DhizukuStatus = DhizukuStatus.MISSING,
+    onRequestDhizukuPermission: () -> Unit = {},
+    onRefreshDhizukuStatus: () -> Unit = {},
 ) {
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
@@ -240,7 +245,15 @@ fun CleanerScreen(
 
     state.panel?.let { panel ->
         CleanerModalSheet(onDismiss = { onIntent(CleanerIntent.DismissPanel) }) {
-            CleanerSheetContent(panel, state, onIntent)
+            CleanerSheetContent(
+                panel = panel,
+                state = state,
+                onIntent = onIntent,
+                dhizukuFallbackEnabled = dhizukuFallbackEnabled,
+                dhizukuStatus = dhizukuStatus,
+                onRequestDhizukuPermission = onRequestDhizukuPermission,
+                onRefreshDhizukuStatus = onRefreshDhizukuStatus,
+            )
         }
     }
 }

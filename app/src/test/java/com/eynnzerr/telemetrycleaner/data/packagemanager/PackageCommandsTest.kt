@@ -531,62 +531,40 @@ class PackageCommandsTest {
     }
 
     @Test
-    fun change_uninstallSuccessAndFallbackDisableWhenBlocked() = runTest {
+    fun change_uninstallDenialPreservesSystemErrorWithoutFallbackDisable() = runTest {
         val pkg = "com.oppo.ctautoregist"
         val target = ChangeTarget(pkg, 0)
-        var disabled = false
 
         val executor = FakePackageExecutor(
             onExecute = { args ->
                 when (args.firstOrNull()) {
                     "uninstall" -> PackageShellResult(1, "Failure [DELETE_FAILED_USER_RESTRICTED]")
-                    "disable-user" -> {
-                        disabled = true
-                        PackageShellResult(0, "Package $pkg new state: disabled-user")
-                    }
+                    "disable-user" -> PackageShellResult(0, "Package $pkg new state: disabled-user")
                     else -> PackageShellResult(1, "")
                 }
             },
             onDump = {
-                val enabled = if (disabled) {
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
-                } else {
-                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-                }
                 PackageShellResult(
                     0,
-                    packageDump(pkg, userLines = listOf("User 0: installed=true enabled=$enabled")),
+                    packageDump(pkg, userLines = listOf("User 0: installed=true enabled=0")),
                 )
             },
         )
 
-        // With fallback enabled, should disable instead
-        val disabledOutcome = PackageCommands(executor).change(
-            target = target,
-            action = PackageAction.UNINSTALL,
-            requireVerifiedSystemIdentity = false,
-            captureDenialLog = false,
-            disableOnUninstallFailure = true,
-        )
-        assertFalse(disabledOutcome.success)
-        assertTrue(disabledOutcome.disabledInstead)
-        assertNull(disabledOutcome.failure)
-
-        // Reset and run with fallback disabled -> preserves exact system error text
-        disabled = false
         val deniedOutcome = PackageCommands(executor).change(
             target = target,
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
         )
         assertFalse(deniedOutcome.success)
-        assertFalse(deniedOutcome.disabledInstead)
+        assertFalse(deniedOutcome.hiddenInstead)
         assertEquals(
             ChangeFailure.SystemError("Failure [DELETE_FAILED_USER_RESTRICTED]"),
             deniedOutcome.failure,
         )
+        assertEquals(1, executor.executedCommands.size)
+        assertEquals("uninstall", executor.executedCommands.single().first())
     }
 
     @Test
@@ -614,7 +592,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = true,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
         )
         assertFalse(unverified.success)
         assertEquals(ChangeFailure.SystemIdentityNotVerified, unverified.failure)
@@ -624,7 +601,6 @@ class PackageCommandsTest {
             action = PackageAction.RESTORE,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
         )
         assertFalse(sysDisabledRestore.success)
         assertEquals(ChangeFailure.DisabledBySystem, sysDisabledRestore.failure)
@@ -657,7 +633,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
             deleteThroughAppProcess = { _, _, versionCode ->
                 capturedVersionCode = versionCode
                 removed = true
@@ -695,7 +670,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = true,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
             canSubmit = {
                 canSubmitCalled = true
                 true
@@ -733,7 +707,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
             deleteThroughAppProcess = { _, _, _ ->
                 fallbackCalled = true
                 PackageFallbackResult(true, "Should not run")
@@ -745,11 +718,12 @@ class PackageCommandsTest {
     }
 
     @Test
-    fun change_abortsFallbackDeleteAndDisableWhenVersionChangesMidOperation() = runTest {
+    fun change_abortsFallbackDeleteWhenVersionChangesMidOperation() = runTest {
         val pkg = "com.example.custom"
         val target = ChangeTarget(pkg, 0)
         var dumpCount = 0
         var fallbackCalled = false
+        var dhizukuCalled = false
 
         val executor = FakePackageExecutor(
             onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_INTERNAL_ERROR]") },
@@ -773,17 +747,19 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = true,
             deleteThroughAppProcess = { _, _, _ ->
                 fallbackCalled = true
+                PackageFallbackResult(true, "Should not run")
+            },
+            deleteThroughDhizuku = { _, _, _, _ ->
+                dhizukuCalled = true
                 PackageFallbackResult(true, "Should not run")
             },
         )
 
         assertFalse(outcome.success)
-        assertFalse(outcome.disabledInstead)
         assertFalse(fallbackCalled)
-        // Only the initial uninstall command should have run; no disable-user fallback on the updated version.
+        assertFalse(dhizukuCalled)
         assertEquals(1, executor.executedCommands.size)
         assertEquals("uninstall", executor.executedCommands.single().first())
     }
@@ -804,7 +780,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = true,
             canSubmit = { false },
             submitDeniedFailure = ChangeFailure.SpaceStateUnverified,
         )
@@ -833,7 +808,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = true,
-            disableOnUninstallFailure = true,
             canSubmit = {
                 submitChecks += 1
                 submitChecks == 1
@@ -846,7 +820,6 @@ class PackageCommandsTest {
         )
 
         assertFalse(outcome.success)
-        assertFalse(outcome.disabledInstead)
         assertFalse(fallbackCalled)
         assertEquals(ChangeFailure.SpaceStateUnverified, outcome.failure)
         assertEquals(1, executor.executedCommands.size)
@@ -882,7 +855,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
             deleteThroughAppProcess = { _, _, _ ->
                 fallbackCalled = true
                 PackageFallbackResult(true, "Should not run")
@@ -898,7 +870,7 @@ class PackageCommandsTest {
     }
 
     @Test
-    fun change_skipsFallbackDeleteAndDisableWhenInitialVersionCodeIsMissing() = runTest {
+    fun change_skipsFallbackDeleteWhenInitialVersionCodeIsMissing() = runTest {
         val pkg = "com.example.noversion"
         val target = ChangeTarget(pkg, 0)
         var fallbackCalled = false
@@ -923,7 +895,6 @@ class PackageCommandsTest {
             action = PackageAction.UNINSTALL,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = true,
             deleteThroughAppProcess = { _, _, _ ->
                 fallbackCalled = true
                 PackageFallbackResult(true, "Should not run")
@@ -931,7 +902,6 @@ class PackageCommandsTest {
         )
 
         assertFalse(outcome.success)
-        assertFalse(outcome.disabledInstead)
         assertFalse(fallbackCalled)
         assertEquals(1, executor.executedCommands.size)
         assertEquals("uninstall", executor.executedCommands.single().first())
@@ -957,7 +927,6 @@ class PackageCommandsTest {
                 action = PackageAction.UNINSTALL,
                 requireVerifiedSystemIdentity = true,
                 captureDenialLog = false,
-                disableOnUninstallFailure = false,
                 canSubmit = {
                     canSubmitCalled = true
                     true
@@ -992,7 +961,6 @@ class PackageCommandsTest {
                     action = PackageAction.UNINSTALL,
                     requireVerifiedSystemIdentity = false,
                     captureDenialLog = false,
-                    disableOnUninstallFailure = false,
                 )
             } catch (_: CancellationException) {
                 caughtCancellation = true
@@ -1157,7 +1125,6 @@ class PackageCommandsTest {
             action = PackageAction.DISABLE,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
         )
 
         assertTrue(outcome.success)
@@ -1200,11 +1167,445 @@ class PackageCommandsTest {
             action = PackageAction.RESTORE,
             requireVerifiedSystemIdentity = false,
             captureDenialLog = false,
-            disableOnUninstallFailure = false,
         )
 
         assertTrue(outcome.success)
         assertFalse(outcome.suspendedInstead)
         assertEquals(listOf(listOf("unsuspend", "--user", "0", pkg)), executor.executedCommands)
+    }
+
+    @Test
+    fun scan_parsesHiddenPackageStateFromDumpAndLookupFindsIt() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val entry = PackageEntry(pkg, "Device Management", emptySet())
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                if (args == listOf("list", "users")) PackageShellResult(0, usersOutput())
+                else PackageShellResult(1, "")
+            },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        userLines = listOf(
+                            "User 0: ceDataInode=1 installed=true hidden=true enabled=0",
+                            "User 10: ceDataInode=2 installed=true hidden=false enabled=0",
+                            "User 11: ceDataInode=3 installed=false hidden=true enabled=0",
+                        ),
+                    ),
+                )
+            },
+        )
+
+        val snapshot = PackageCommands(executor).scan(0, listOf(entry), permissionManager = null)
+        val detected = snapshot.packages.single()
+        assertEquals(PackageState.HIDDEN, detected.users[0])
+        assertEquals(PackageState.INSTALLED, detected.users[10])
+        assertEquals(PackageState.RESTORABLE, detected.users[11])
+        assertTrue(PackageCommands(executor).read(pkg).toLookupResult() is PackageLookupResult.Found)
+    }
+
+    @Test
+    fun change_uninstallFallsBackToDhizukuAndVerifiesRemoval() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val target = ChangeTarget(pkg, 0)
+        var removed = false
+        var now = 0L
+        var capturedVersionCode: Long? = null
+        var capturedIsSystem: Boolean? = null
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_USER_RESTRICTED]") },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        versionCode = 54000L,
+                        flags = "SYSTEM HAS_CODE",
+                        userLines = listOf("User 0: installed=${!removed} hidden=false enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val commands = PackageCommands(executor, clock = { now.also { now += 100L } })
+        val outcome = commands.change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = true,
+            deleteThroughAppProcess = { _, _, _ ->
+                PackageFallbackResult(submitted = true, detail = "DELETE_REQUESTED")
+            },
+            deleteThroughDhizuku = { _, _, versionCode, isSystemApp ->
+                capturedVersionCode = versionCode
+                capturedIsSystem = isSystemApp
+                removed = true
+                PackageFallbackResult(submitted = true, detail = "DHIZUKU_UNINSTALL_SUCCESS")
+            },
+        )
+
+        assertTrue(outcome.success)
+        assertFalse(outcome.hiddenInstead)
+        assertNull(outcome.failure)
+        assertEquals(54000L, capturedVersionCode)
+        assertEquals(true, capturedIsSystem)
+    }
+
+    @Test
+    fun change_uninstallUses64BitDhizukuEvenWhen32BitAppProcessSkipsLongVersionCode() = runTest {
+        val pkg = "com.example.longversion"
+        val longVersion = Int.MAX_VALUE.toLong() + 99L
+        val target = ChangeTarget(pkg, 0)
+        var removed = false
+        var appProcessCalled = false
+        var dhizukuVersion: Long? = null
+        var dhizukuIsSystem: Boolean? = null
+        var now = 0L
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_USER_RESTRICTED]") },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        versionCode = longVersion,
+                        flags = "HAS_CODE",
+                        userLines = listOf("User 0: installed=${!removed} hidden=false enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor, clock = { now.also { now += 100L } }).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            deleteThroughAppProcess = { _, _, _ ->
+                appProcessCalled = true
+                PackageFallbackResult(true, "Should be skipped")
+            },
+            deleteThroughDhizuku = { _, _, versionCode, isSystem ->
+                dhizukuVersion = versionCode
+                dhizukuIsSystem = isSystem
+                removed = true
+                PackageFallbackResult(true, "DHIZUKU_UNINSTALL_SUCCESS")
+            },
+        )
+
+        assertTrue(outcome.success)
+        assertFalse(appProcessCalled)
+        assertEquals(longVersion, dhizukuVersion)
+        assertEquals(false, dhizukuIsSystem)
+    }
+
+    @Test
+    fun change_uninstallDoesNotFallbackToDisableOrHideWhenDhizukuUninstallBlocked() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val target = ChangeTarget(pkg, 0)
+        var hideCalled = false
+
+        val executor = FakePackageExecutor(
+            onExecute = { args ->
+                when (args.firstOrNull()) {
+                    "uninstall" -> PackageShellResult(1, "Failure [DELETE_FAILED_USER_RESTRICTED]")
+                    "disable-user" -> PackageShellResult(0, "Package $pkg new state: disabled-user")
+                    else -> PackageShellResult(1, "")
+                }
+            },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        userLines = listOf("User 0: installed=true hidden=false enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = true,
+            deleteThroughDhizuku = { _, _, _, _ ->
+                PackageFallbackResult(submitted = false, detail = "DHIZUKU_UNINSTALL_FAILED status=1")
+            },
+            hideThroughDhizuku = { _, _ ->
+                hideCalled = true
+                PackageFallbackResult(submitted = true, detail = "Should not run")
+            },
+        )
+
+        assertFalse(outcome.success)
+        assertFalse(outcome.hiddenInstead)
+        assertFalse(hideCalled)
+        assertEquals(
+            ChangeFailure.SystemError("Failure [DELETE_FAILED_USER_RESTRICTED]"),
+            outcome.failure,
+        )
+        assertEquals(1, executor.executedCommands.size)
+        assertEquals("uninstall", executor.executedCommands.single().first())
+        assertTrue(outcome.denialLog.orEmpty().contains("DHIZUKU_UNINSTALL_FAILED status=1"))
+    }
+
+    @Test
+    fun change_manualDisableFallsBackToDhizukuHideWhenDisableUserBlocked() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val target = ChangeTarget(pkg, 0)
+        var hidden = false
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "SecurityException: Cannot disable no root permission") },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(
+                        pkg,
+                        userLines = listOf("User 0: installed=true hidden=$hidden enabled=0"),
+                    ),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.DISABLE,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            hideThroughDhizuku = { _, _ ->
+                hidden = true
+                PackageFallbackResult(submitted = true, detail = "DHIZUKU_SET_HIDDEN applied=true")
+            },
+        )
+
+        assertTrue(outcome.success)
+        assertTrue(outcome.hiddenInstead)
+        assertNull(outcome.failure)
+    }
+
+    @Test
+    fun change_restoreHiddenPackageWorksViaDhizukuOrRootAndReportsErrorWithoutBoth() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val target = ChangeTarget(pkg, 0)
+
+        // 1. Neither Dhizuku nor Root -> HiddenByDeviceOwner
+        val deniedExecutor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(0, packageDump(pkg, userLines = listOf("User 0: installed=true hidden=true enabled=0")))
+            },
+        )
+        val denied = PackageCommands(deniedExecutor).change(
+            target = target,
+            action = PackageAction.RESTORE,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+        )
+        assertFalse(denied.success)
+        assertEquals(ChangeFailure.HiddenByDeviceOwner, denied.failure)
+        assertTrue(deniedExecutor.executedCommands.isEmpty())
+
+        // 2. Dhizuku unhide succeeds (and also re-enables if user-disabled underneath)
+        var hidden = true
+        var enabled = PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+        val dhizukuExecutor = FakePackageExecutor(
+            onExecute = { args ->
+                if (args.firstOrNull() == "enable") {
+                    enabled = PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                    PackageShellResult(0, "Package $pkg new state: enabled")
+                } else {
+                    PackageShellResult(1, "")
+                }
+            },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(pkg, userLines = listOf("User 0: installed=true hidden=$hidden enabled=$enabled")),
+                )
+            },
+        )
+        val unhiddenByDhizuku = PackageCommands(dhizukuExecutor).change(
+            target = target,
+            action = PackageAction.RESTORE,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            unhideThroughDhizuku = { _, _ ->
+                hidden = false
+                PackageFallbackResult(submitted = true, detail = "DHIZUKU_SET_HIDDEN hidden=false applied=true")
+            },
+        )
+        assertTrue(unhiddenByDhizuku.success)
+        assertNull(unhiddenByDhizuku.failure)
+        assertEquals(listOf(listOf("enable", "--user", "0", pkg)), dhizukuExecutor.executedCommands)
+
+        // 3. Root mode unhides via `cmd package unhide`
+        var rootHidden = true
+        val rootExecutor = FakePackageExecutor(
+            onExecute = { args ->
+                if (args == listOf("unhide", "--user", "0", pkg)) {
+                    rootHidden = false
+                    PackageShellResult(0, "Package $pkg new hidden state: false")
+                } else {
+                    PackageShellResult(1, "")
+                }
+            },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(pkg, userLines = listOf("User 0: installed=true hidden=$rootHidden enabled=0")),
+                )
+            },
+        )
+        val unhiddenByRoot = PackageCommands(rootExecutor).change(
+            target = target,
+            action = PackageAction.RESTORE,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            allowShellUnhide = true,
+        )
+        assertTrue(unhiddenByRoot.success)
+        assertNull(unhiddenByRoot.failure)
+        assertEquals(listOf(listOf("unhide", "--user", "0", pkg)), rootExecutor.executedCommands)
+    }
+
+    @Test
+    fun change_restoreHiddenAndSuspendedPackageUnsuspendsViaDhizukuOrRoot() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val target = ChangeTarget(pkg, 0)
+
+        for (useDhizuku in listOf(true, false)) {
+            var hidden = true
+            var suspended = true
+            val executor = FakePackageExecutor(
+                onExecute = { args ->
+                    when (args.firstOrNull()) {
+                        "unhide" -> {
+                            hidden = false
+                            PackageShellResult(0, "Package $pkg new hidden state: false")
+                        }
+                        "unsuspend" -> {
+                            suspended = false
+                            PackageShellResult(0, "Package $pkg new suspended state: false")
+                        }
+                        else -> PackageShellResult(1, "")
+                    }
+                },
+                onDump = {
+                    PackageShellResult(
+                        0,
+                        packageDump(
+                            pkg,
+                            userLines = listOf(
+                                "User 0: installed=true hidden=$hidden suspended=$suspended enabled=0",
+                            ),
+                        ),
+                    )
+                },
+            )
+
+            val outcome = PackageCommands(executor).change(
+                target = target,
+                action = PackageAction.RESTORE,
+                requireVerifiedSystemIdentity = false,
+                captureDenialLog = false,
+                unhideThroughDhizuku = if (useDhizuku) {
+                    { _, _ ->
+                        hidden = false
+                        PackageFallbackResult(submitted = true, detail = "DHIZUKU_SET_HIDDEN hidden=false")
+                    }
+                } else {
+                    null
+                },
+                allowShellUnhide = !useDhizuku,
+            )
+
+            assertTrue("useDhizuku=$useDhizuku, outcome=$outcome", outcome.success)
+            assertNull(outcome.failure)
+            assertEquals(listOf("unsuspend", "--user", "0", pkg), executor.executedCommands.last())
+            assertEquals(useDhizuku, executor.executedCommands.none { it.firstOrNull() == "unhide" })
+        }
+    }
+
+    @Test
+    fun change_restoreRestorableFallsBackToDhizukuInstallExisting() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val target = ChangeTarget(pkg, 0)
+        var installed = false
+
+        val executor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [INSTALL_FAILED_USER_RESTRICTED]") },
+            onDump = {
+                PackageShellResult(
+                    0,
+                    packageDump(pkg, userLines = listOf("User 0: installed=$installed hidden=false enabled=0")),
+                )
+            },
+        )
+
+        val outcome = PackageCommands(executor).change(
+            target = target,
+            action = PackageAction.RESTORE,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = false,
+            installExistingThroughDhizuku = { _, _ ->
+                installed = true
+                PackageFallbackResult(submitted = true, detail = "DHIZUKU_INSTALL_EXISTING installed=true")
+            },
+        )
+
+        assertTrue(outcome.success)
+        assertNull(outcome.failure)
+    }
+
+    @Test
+    fun change_autoCleanupSkipsHiddenPackageAndDiagnosticsRecordDhizukuUninstallAttempt() = runTest {
+        val pkg = "com.vivo.devicereg"
+        val target = ChangeTarget(pkg, 0)
+        var canSubmitCalled = false
+
+        val hiddenExecutor = FakePackageExecutor(
+            onDump = {
+                PackageShellResult(0, packageDump(pkg, userLines = listOf("User 0: installed=true hidden=true enabled=0")))
+            },
+        )
+        val skipped = PackageCommands(hiddenExecutor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = true,
+            captureDenialLog = false,
+            canSubmit = {
+                canSubmitCalled = true
+                true
+            },
+        )
+        assertTrue(skipped.success)
+        assertFalse(canSubmitCalled)
+
+        // When uninstall fails, denial log preserves Dhizuku uninstall details.
+        val failExecutor = FakePackageExecutor(
+            onExecute = { PackageShellResult(1, "Failure [DELETE_FAILED_USER_RESTRICTED]") },
+            onDump = {
+                PackageShellResult(0, packageDump(pkg, userLines = listOf("User 0: installed=true hidden=false enabled=0")))
+            },
+        )
+        val denied = PackageCommands(failExecutor).change(
+            target = target,
+            action = PackageAction.UNINSTALL,
+            requireVerifiedSystemIdentity = false,
+            captureDenialLog = true,
+            deleteThroughDhizuku = { _, _, _, _ ->
+                PackageFallbackResult(false, "DHIZUKU_UNINSTALL_FAILED status=1 legacy=-1")
+            },
+        )
+        assertFalse(denied.success)
+        assertFalse(denied.hiddenInstead)
+        val log = denied.denialLog.orEmpty()
+        assertTrue(log.contains("Dhizuku uninstall:"))
+        assertTrue(log.contains("DHIZUKU_UNINSTALL_FAILED status=1 legacy=-1"))
     }
 }

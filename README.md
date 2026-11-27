@@ -14,7 +14,7 @@ TelemetryCleaner 可以检测国行 Android 固件预置的运营商组件、厂
 1. 提供清单未覆盖的厂商+运营商+包名线索，在 README.md 中补充即可；
 2. 提供针对某模块的实测与分析报告，不限制是否为 AI 生成，但需保证真实性。放于 docs 目录中即可；
 3. ~协助实现未支持的免 Root 卸载功能（如**现版本不支持部分 vivo 系的电信/移动组件卸载**）~；
-4. 对软件功能的反馈或改进。
+4. 在 [Discussions](https://github.com/Eynnzerr/TelemetryCleaner/discussions) 或 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 提供功能反馈、实测体验与改进建议。
 
 ## 背景介绍
 
@@ -28,16 +28,17 @@ WiSec 2023 的流量测量还在部分国行样机上观察到运营商组件上
 
 Android 10 及以上设备可安装本项目。默认使用 Shizuku，已获取 Root 的设备可在首页选择「使用 Root」，也可在设置里切换权限来源。扫描后可选择空间、查看组件权限或批量操作。
 
-- **Shizuku** · 按 [Shizuku 启动指南](https://shizuku.rikka.app/guide/setup/)通过 ADB 或无线调试启动服务，再回到 App 授权。Android 11 及以上支持无线调试启动。
+- **Shizuku**（[仓库](https://github.com/RikkaApps/Shizuku) · [下载最新 Release](https://github.com/RikkaApps/Shizuku/releases/latest)）· 按 [Shizuku 启动指南](https://shizuku.rikka.app/guide/setup/)通过 ADB 或无线调试启动服务，再回到 App 授权。Android 11 及以上支持无线调试启动。
+- **Dhizuku 增强（可选，配合 Shizuku 使用）**（[仓库](https://github.com/iamr0s/Dhizuku) · [下载最新 Release](https://github.com/iamr0s/Dhizuku/releases/latest)）· 若已安装并激活 Dhizuku（设备所有者 / Device Owner），可在设置页的「权限来源」中开启「Dhizuku 增强」。当 Shizuku（UID 2000）被 ROM 拦截时，主空间（用户 0）将自动回落到 Dhizuku 代理的 `PackageInstaller` / `DevicePolicyManager` 接口继续尝试。 [Dhizuku 桥接实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/DhizukuBridge.kt)
 - **Root** · 在 Root 管理器里授权 Telemetry Cleaner，回到首页连接 Root。扫描、卸载、恢复和自动清理通过 Root 会话执行，无需安装 Shizuku。
 
 ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系统包管理服务，避开部分 ROM 对 `pm` 命令行入口的拦截。系统包管理服务仍会执行本机的权限和包状态校验。 [Binder 调用实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/PackageBinder.kt)
 
-少数 ROM 会在命令层拒绝卸载系统应用，例如返回 `Failure [only root can delete system app for a particular user]`。Shizuku 模式可通过 `app_process` 调用 `IPackageManager.deletePackageAsUser` 再试一次。App 回读包状态确认结果，失败时结果页保留原始系统错误。 [app_process 兜底实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/PackageFallback.kt)
+少数 ROM 会在命令层拒绝卸载系统应用，例如返回 `Failure [only root can delete system app for a particular user]`。Shizuku 模式可通过 `app_process` 调用 `IPackageManager.deletePackageAsUser` 再试一次；若开启了「Dhizuku 增强」，在 shell 身份仍被拦截时还会进一步通过 Device Owner 通道尝试（进入 PMS 时身份切换为 `UID 1000` 并携带 `DELETE_SYSTEM_APP`，已在未 Root ColorOS 16 真机实测通过 `com.oplus.olc` 卸载与恢复，详见 [OLC 保护分析](docs/reports/oplus-olc-protection.md)）。App 回读包状态确认结果，失败时结果页保留原始系统错误。 [app_process 兜底实现](app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/PackageFallback.kt)
 
 卸载按选定空间执行，会清除该空间中的组件数据。恢复使用系统保留的 APK。自动清理默认关闭，开启后按配置的周期检查所选空间，只处理自动清理名单内的组件。使用 Root 时，设备重启或 App 进程退出后，需在首页重新连接 Root 才会继续自动清理。
 
-**已知限制：vivo OriginOS 的 PMS 底层中，电信/移动组件 com.vivo.devicereg 被列入了 vivo 系统保护名单，暂无法在非 Root 情况下完成卸载。其他厂商经实测反馈均支持。**
+**已知限制：vivo OriginOS 的 `com.vivo.devicereg`、ColorOS 的 `com.oplus.olc` 等受系统保护组件在纯 Shizuku（UID 2000）下会被拦截，需开启可选的「Dhizuku 增强」（仅主空间用户 0）或使用 Root；其中 `com.vivo.devicereg` 的 Dhizuku 路径仍欢迎社区实测反馈。**
 
 ## 内置组件清单
 
@@ -50,7 +51,7 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 | OPPO / 一加 / realme | 移动 | `com.coloros.regservice` | 已实测 |
 | 小米 / Redmi / POCO | 电信 | `com.xiaomi.registration` | 已实测 |
 | 小米 / Redmi / POCO | 移动 | `com.miui.dmregservice` | 已实测 |
-| vivo | 移动 / 电信 | `com.vivo.devicereg` | 暂不支持 |
+| vivo | 移动 / 电信 | `com.vivo.devicereg` | 需 Root / Dhizuku（待验证） |
 | 华为及旧荣耀 | 电信（数据） | `com.huawei.android.UEInfoCheck` | 已实测 |
 | 华为及旧荣耀 | 电信（短信） | `com.huawei.android.AutoRegSms` | 已实测 |
 | 华为 | 移动 | `com.huawei.regservice` | 已实测 |
@@ -62,7 +63,7 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 
 本人只验证了 SystemHelper 和 OPPO 组件的卸载，小米、华为由网友验证实测。其他厂商因缺少设备暂未验证，如决定卸载，请自行承担风险。
 
-各厂商社区实测机型与已知问题整理见 [机型实测与使用反馈](docs/user-feedback.md)。欢迎在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 反馈某厂商某模块卸载后使用正常，也欢迎补充组件。附上机型、系统版本、包名和实际结果，便于复核。
+各厂商社区实测机型与已知问题整理见 [机型实测与使用反馈](docs/user-feedback.md)。欢迎在 [Discussions](https://github.com/Eynnzerr/TelemetryCleaner/discussions) 分享机型实测结果、使用提问或功能讨论；如遇到 Bug 或有未收录的新组件包名线索，请在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 提交。反馈时请尽量附上机型、系统版本、包名和实际结果，便于复核。
 
 ## 厂商遥测组件（可选）
 
@@ -119,15 +120,23 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 - [ ] 扩充更多组件检测（包括厂商自己的敏感数据收集组件）作为可选项
 - [x] 部分 vivo 系不支持卸载 SystemHelper 外的组件。暂提供冻结策略作为兜底
 - [x] 补充各厂商内置浏览器包名，并验证冻结/暂停路径
+- [x] 为受 ROM 保护的组件增加可选的 Dhizuku（设备所有者）免 Root 增强通道
 
 ## 发布
 
 1. 在 `app/build.gradle.kts` 提升 `versionCode` / `versionName`，并在 `CHANGELOG.md` 添加同名版本章节；
 2. 提交并推送代码；
-3. 推送与 `versionName` 一致的 tag，例如 `git tag v1.5.2 && git push origin v1.5.2`；
+3. 推送与 `versionName` 一致的 tag，例如 `git tag v1.6 && git push origin v1.6`；
 4. GitHub Actions 会自动构建签名 APK，上传构建产物，并创建对应 Release。
 
 签名密钥通过仓库 Secrets 提供：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。
+
+## 致谢
+
+本项目的免 Root 能力依托以下优秀开源项目，感谢作者与维护者的贡献；未安装的用户可直接前往对应 Releases 页面下载：
+
+- **[Shizuku](https://github.com/RikkaApps/Shizuku)**（[下载 Releases](https://github.com/RikkaApps/Shizuku/releases/latest) · [Shizuku-API](https://github.com/RikkaApps/Shizuku-API) · [启动指南](https://shizuku.rikka.app/guide/setup/)）—— 提供免 Root 的 ADB / 无线调试 Binder 代理能力。
+- **[Dhizuku](https://github.com/iamr0s/Dhizuku)**（[下载 Releases](https://github.com/iamr0s/Dhizuku/releases/latest) · [Dhizuku-API](https://github.com/iamr0s/Dhizuku-API)）—— 提供 Device Owner 权限共享能力，用于增强处理受 ROM 保护的主空间组件。
 
 <a href="https://www.star-history.com/?repos=Eynnzerr%2FTelemetryCleaner&amp;type=date">
   <picture>

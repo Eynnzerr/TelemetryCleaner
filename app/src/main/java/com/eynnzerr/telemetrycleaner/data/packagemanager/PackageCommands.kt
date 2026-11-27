@@ -71,6 +71,7 @@ internal fun PackageReading.toLookupResult(): PackageLookupResult = when (this) 
             it == PackageState.INSTALLED ||
                 it == PackageState.DISABLED ||
                 it == PackageState.SUSPENDED ||
+                it == PackageState.HIDDEN ||
                 it == PackageState.RESTORABLE
         } -> PackageLookupResult.Found(record)
         record.hasVerifiedApk == false &&
@@ -294,21 +295,32 @@ internal class PackageCommands(
      *
      * [requireVerifiedSystemIdentity] enforces the package identity check for background cleanup.
      * [captureDenialLog] keeps the system response for rejected interactive uninstalls.
-     * [disableOnUninstallFailure] permits one ordinary package disable if an uninstall leaves the package installed.
-     * [allowDisabledForUninstall] controls whether an already-disabled package may still be uninstalled.
+     * [allowDisabledForUninstall] controls whether an already-disabled or hidden package may still be uninstalled.
      * [deleteThroughAppProcess] retries one uninstall directly through app_process when the
      * command layer fails. The original system error still describes a failed retry.
+     * [deleteThroughDhizuku] retries one uninstall through Dhizuku's Device Owner `PackageInstaller`
+     * when shell-UID deletion is blocked.
+     * [hideThroughDhizuku] falls back to `DevicePolicyManager.setApplicationHidden(..., true)` when
+     * `disable-user` is blocked in Shizuku mode.
+     * [unhideThroughDhizuku] restores a `HIDDEN` package through Dhizuku.
+     * [installExistingThroughDhizuku] retries `RESTORABLE` restoration through DevicePolicyManager
+     * when `cmd package install-existing` is blocked.
+     * [allowShellUnhide] permits `cmd package unhide` (available in Root mode) to restore a `HIDDEN` package.
      */
     suspend fun change(
         target: ChangeTarget,
         action: PackageAction,
         requireVerifiedSystemIdentity: Boolean,
         captureDenialLog: Boolean,
-        disableOnUninstallFailure: Boolean,
         allowDisabledForUninstall: Boolean = false,
         canSubmit: suspend () -> Boolean = { true },
         submitDeniedFailure: ChangeFailure? = null,
         deleteThroughAppProcess: ((String, Int, Int) -> PackageFallbackResult)? = null,
+        deleteThroughDhizuku: ((String, Int, Long, Boolean) -> PackageFallbackResult)? = null,
+        hideThroughDhizuku: ((String, Int) -> PackageFallbackResult)? = null,
+        unhideThroughDhizuku: ((String, Int) -> PackageFallbackResult)? = null,
+        installExistingThroughDhizuku: ((String, Int) -> PackageFallbackResult)? = null,
+        allowShellUnhide: Boolean = false,
     ): ChangeOutcome {
         val packageName = target.packageName
         val reading = read(packageName)
@@ -325,15 +337,16 @@ internal class PackageCommands(
             return ChangeOutcome(target, false, ChangeFailure.SpaceStateUnverified)
         }
         val reenable = action == PackageAction.RESTORE && state == PackageState.DISABLED
+        val unhide = action == PackageAction.RESTORE && state == PackageState.HIDDEN
         if (reenable && record.enabledSettings[target.userId] != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
             return ChangeOutcome(target, false, ChangeFailure.DisabledBySystem)
         }
         if (action == PackageAction.UNINSTALL &&
-            (state == PackageState.DISABLED || state == PackageState.SUSPENDED) &&
+            (state == PackageState.DISABLED || state == PackageState.SUSPENDED || state == PackageState.HIDDEN) &&
             !allowDisabledForUninstall
         ) {
             return if (requireVerifiedSystemIdentity) {
-                // Background cleanup skips already-frozen packages without wiping user data or recording a failure.
+                // Background cleanup skips already-frozen or hidden packages without wiping user data or recording a failure.
                 ChangeOutcome(target, true, null)
             } else {
                 ChangeOutcome(target, false, ChangeFailure.NotEnabledInSpace)
@@ -347,10 +360,10 @@ internal class PackageCommands(
         ) {
             return ChangeOutcome(target, false, ChangeFailure.SpaceStateUnverified)
         }
-        if (!reenable && reading.matches(target, action)) {
+        if (!reenable && !unhide && reading.matches(target, action)) {
             return ChangeOutcome(target, true, null, suspendedInstead = state == PackageState.SUSPENDED)
         }
-        if (!reenable && !state.permits(action)) {
+        if (!reenable && !unhide && !state.permits(action)) {
             val failure = if (action == PackageAction.DISABLE) {
                 ChangeFailure.NotEnabledInSpace
             } else {
@@ -360,6 +373,17 @@ internal class PackageCommands(
         }
 
         val userId = target.userId.toString()
+        if (unhide) {
+            return restoreHiddenPackage(
+                target = target,
+                userId = userId,
+                canSubmit = canSubmit,
+                submitDeniedFailure = submitDeniedFailure,
+                unhideThroughDhizuku = unhideThroughDhizuku,
+                allowShellUnhide = allowShellUnhide,
+            )
+        }
+
         val command = when (action) {
             PackageAction.UNINSTALL -> buildList {
                 addAll(listOf("uninstall", "--user", userId))
@@ -410,7 +434,7 @@ internal class PackageCommands(
         var submitDeniedOnRetry = false
         val postCanUninstall = (post == PackageState.INSTALLED &&
             (!requireVerifiedSystemIdentity || allowDisabledForUninstall || afterRequest.enabledFor(target.userId).isExplicitlyEnabled())) ||
-            (allowDisabledForUninstall && post == PackageState.DISABLED)
+            (allowDisabledForUninstall && (post == PackageState.DISABLED || post == PackageState.HIDDEN))
         val fallbackVersionCode = record.versionCode?.takeIf { it in 0L..Int.MAX_VALUE.toLong() }?.toInt()
         val postVersionMatches = record.versionCode != null && afterRequest.versionCode() == record.versionCode
         val fallback = if (deleteThroughAppProcess != null && action == PackageAction.UNINSTALL &&
@@ -430,26 +454,31 @@ internal class PackageCommands(
             return ChangeOutcome(target, true, null)
         }
 
-        var disableAttempt: Result<PackageShellResult>? = null
-        var afterDisable: PackageState? = null
-        if (!submitDeniedOnRetry && disableOnUninstallFailure && action == PackageAction.UNINSTALL) {
-            val current = read(packageName)
-            val currentState = readUserState(target, current)
-            if (current.matches(target, action)) return ChangeOutcome(target, true, null)
-            val enabled = current.enabledFor(target.userId)
-            val currentVersionMatches = record.versionCode != null && current.versionCode() == record.versionCode
-            if (currentState == PackageState.INSTALLED &&
-                currentVersionMatches &&
-                enabled.isExplicitlyEnabled()
-            ) {
+        var dhizukuUninstall: PackageFallbackResult? = null
+        if (!submitDeniedOnRetry && deleteThroughDhizuku != null && action == PackageAction.UNINSTALL &&
+            record.versionCode != null
+        ) {
+            val beforeDhizuku = if (fallback != null) read(packageName) else afterRequest
+            if (beforeDhizuku.matches(target, PackageAction.UNINSTALL)) {
+                return ChangeOutcome(target, true, null)
+            }
+            val beforeState = readUserState(target, beforeDhizuku)
+            val beforeCanUninstall = (beforeState == PackageState.INSTALLED &&
+                (!requireVerifiedSystemIdentity || allowDisabledForUninstall ||
+                    beforeDhizuku.enabledFor(target.userId).isExplicitlyEnabled())) ||
+                (allowDisabledForUninstall && (beforeState == PackageState.DISABLED || beforeState == PackageState.HIDDEN))
+            val beforeVersionMatches = beforeDhizuku.versionCode() == record.versionCode
+            if (beforeCanUninstall && beforeVersionMatches) {
                 if (canSubmit()) {
                     currentCoroutineContext().ensureActive()
-                    disableAttempt = executeChange(target.disableCommand())
-                    val updated = read(packageName)
-                    afterDisable = readUserState(target, updated)
-                    if (updated.matches(target, action)) return ChangeOutcome(target, true, null)
-                    if (updated.matches(target, PackageAction.DISABLE)) {
-                        return ChangeOutcome(target, false, null, disabledInstead = true)
+                    dhizukuUninstall = deleteThroughDhizuku(
+                        packageName,
+                        target.userId,
+                        record.versionCode,
+                        record.hasSystemCopy == true,
+                    )
+                    if (dhizukuUninstall.submitted && awaitUninstall(target)) {
+                        return ChangeOutcome(target, true, null)
                     }
                 } else {
                     submitDeniedOnRetry = true
@@ -457,14 +486,65 @@ internal class PackageCommands(
             }
         }
 
+        var dhizukuHide: PackageFallbackResult? = null
+        if (!submitDeniedOnRetry && action == PackageAction.DISABLE && hideThroughDhizuku != null) {
+            val currentVersionMatches = record.versionCode != null && afterRequest.versionCode() == record.versionCode
+            if (post == PackageState.INSTALLED &&
+                currentVersionMatches &&
+                afterRequest.enabledFor(target.userId).isExplicitlyEnabled()
+            ) {
+                if (canSubmit()) {
+                    currentCoroutineContext().ensureActive()
+                    dhizukuHide = hideThroughDhizuku(packageName, target.userId)
+                    val updatedAfterHide = read(packageName)
+                    if (readUserState(target, updatedAfterHide) == PackageState.HIDDEN) {
+                        return ChangeOutcome(target, true, null, hiddenInstead = true)
+                    }
+                } else {
+                    submitDeniedOnRetry = true
+                }
+            }
+        }
+
+        if (!submitDeniedOnRetry && action == PackageAction.RESTORE && !reenable &&
+            installExistingThroughDhizuku != null && post == PackageState.RESTORABLE
+        ) {
+            if (canSubmit()) {
+                currentCoroutineContext().ensureActive()
+                val restoreFallback = installExistingThroughDhizuku(packageName, target.userId)
+                if (restoreFallback.submitted) {
+                    val updated = read(packageName)
+                    if (updated.matches(target, PackageAction.RESTORE)) {
+                        return ChangeOutcome(target, true, null)
+                    }
+                }
+            } else {
+                submitDeniedOnRetry = true
+            }
+        }
+
         val result = attempt.getOrNull() ?: suspendAttempt?.getOrNull()
         val failure = attempt.exceptionOrNull()
-        if (failure != null && failure !is SecurityException && disableAttempt == null && !submitDeniedOnRetry) throw failure
+        if (failure != null && failure !is SecurityException &&
+            dhizukuUninstall == null && dhizukuHide == null && !submitDeniedOnRetry
+        ) {
+            throw failure
+        }
         val rejected = failure is SecurityException ||
             (result != null && (result.exitCode > 0 || result.systemErrorLine() != null))
-        val denialLog = if (captureDenialLog && (rejected || disableAttempt != null || submitDeniedOnRetry)) {
+        val denialLog = if (captureDenialLog &&
+            (rejected || dhizukuUninstall != null || submitDeniedOnRetry)
+        ) {
             PackageDiagnostics.uninstallDenial(
-                executor, target, record, state, post, startedAt, attempt, fallback, disableAttempt, afterDisable,
+                executor = executor,
+                target = target,
+                record = record,
+                before = state,
+                after = post,
+                startedAt = startedAt,
+                attempt = attempt,
+                fallback = fallback,
+                dhizukuUninstall = dhizukuUninstall,
                 submitDeniedOnRetry = submitDeniedOnRetry,
             )
         } else {
@@ -477,6 +557,78 @@ internal class PackageCommands(
             else -> ChangeFailure.StateUnverified
         }
         return ChangeOutcome(target, false, failureReason, denialLog)
+    }
+
+    /** Restores a package marked `hidden=true` using Dhizuku (Device Owner) or Root (`cmd package unhide`). */
+    private suspend fun restoreHiddenPackage(
+        target: ChangeTarget,
+        userId: String,
+        canSubmit: suspend () -> Boolean,
+        submitDeniedFailure: ChangeFailure?,
+        unhideThroughDhizuku: ((String, Int) -> PackageFallbackResult)?,
+        allowShellUnhide: Boolean,
+    ): ChangeOutcome {
+        if (unhideThroughDhizuku == null && !allowShellUnhide) {
+            return ChangeOutcome(target, false, ChangeFailure.HiddenByDeviceOwner)
+        }
+        currentCoroutineContext().ensureActive()
+        if (!canSubmit()) return ChangeOutcome(target, false, submitDeniedFailure)
+        currentCoroutineContext().ensureActive()
+
+        var shellAttempt: Result<PackageShellResult>? = null
+        if (unhideThroughDhizuku != null) {
+            unhideThroughDhizuku(target.packageName, target.userId)
+        } else {
+            shellAttempt = executeChange(listOf("unhide", "--user", userId, target.packageName))
+        }
+
+        var afterUnhide = read(target.packageName)
+        var post = readUserState(target, afterUnhide)
+        if (post == PackageState.HIDDEN && unhideThroughDhizuku != null && allowShellUnhide) {
+            if (!canSubmit()) return ChangeOutcome(target, false, submitDeniedFailure)
+            currentCoroutineContext().ensureActive()
+            shellAttempt = executeChange(listOf("unhide", "--user", userId, target.packageName))
+            afterUnhide = read(target.packageName)
+            post = readUserState(target, afterUnhide)
+        }
+
+        if (post == PackageState.DISABLED &&
+            afterUnhide.enabledFor(target.userId) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+        ) {
+            if (canSubmit()) {
+                currentCoroutineContext().ensureActive()
+                executeChange(listOf("enable", "--user", userId, target.packageName))
+                afterUnhide = read(target.packageName)
+                post = readUserState(target, afterUnhide)
+            }
+        }
+
+        /** Hidden and suspended can coexist; clear both states before reporting a completed restore. */
+        if (post == PackageState.SUSPENDED) {
+            if (!canSubmit()) return ChangeOutcome(target, false, submitDeniedFailure)
+            currentCoroutineContext().ensureActive()
+            shellAttempt = executeChange(target.unsuspendCommand())
+            afterUnhide = read(target.packageName)
+            post = readUserState(target, afterUnhide)
+        }
+
+        if (post == PackageState.INSTALLED ||
+            (post == PackageState.DISABLED &&
+                afterUnhide.enabledFor(target.userId) != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER)
+        ) {
+            return ChangeOutcome(target, true, null)
+        }
+
+        val shellResult = shellAttempt?.getOrNull()
+        val shellFailure = shellAttempt?.exceptionOrNull()
+        val failure = when {
+            post == null || post == PackageState.UNKNOWN -> ChangeFailure.PostChangeStateUnverified
+            shellResult != null -> failureReason(shellResult, post)
+            shellFailure is SecurityException -> ChangeFailure.SpaceOperationDenied
+            unhideThroughDhizuku != null && post == PackageState.HIDDEN -> ChangeFailure.HiddenByDeviceOwner
+            else -> ChangeFailure.OperationDenied
+        }
+        return ChangeOutcome(target, false, failure)
     }
 
     /** Keeps a package-service failure available for verification and diagnostics. */
@@ -625,11 +777,13 @@ internal class PackageCommands(
             val id = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
             val data = match.groupValues[2]
             val enabled = enabledFlag.find(data)?.groupValues?.get(1)?.toIntOrNull()
+            val hidden = hiddenFlag.find(data)?.groupValues?.get(1) == "true"
             if (enabled != null) enabledSettings[id] = enabled
             val suspended = suspendedFlag.find(data)?.groupValues?.get(1)?.toBooleanStrictOrNull()
             if (suspended != null) suspendedSettings[id] = suspended
             val state = when (installedFlag.find(data)?.groupValues?.get(1)) {
                 "true" -> when {
+                    hidden -> PackageState.HIDDEN
                     suspended == true -> PackageState.SUSPENDED
                     enabled == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
                         enabled == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
@@ -690,6 +844,7 @@ internal class PackageCommands(
         val userHeader = Regex("""^\s+User (\d+):\s+(.*)$""")
         val listedUser = Regex("""^\s*UserInfo\{(\d+):(.*):[a-fA-F0-9]+\}.*$""")
         val installedFlag = Regex("""\binstalled=(true|false)\b""")
+        val hiddenFlag = Regex("""\bhidden=(true|false)\b""")
         val enabledFlag = Regex("""\benabled=(\d+)\b""")
         val suspendedFlag = Regex("""\bsuspended=(true|false)\b""")
         val versionCode = Regex("""^versionCode=(\d+)\b""")

@@ -1,6 +1,7 @@
 package com.eynnzerr.telemetrycleaner.feature.cleaner
 
 import com.eynnzerr.telemetrycleaner.data.AndroidUser
+import com.eynnzerr.telemetrycleaner.data.ChangeFailure
 import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
 import com.eynnzerr.telemetrycleaner.data.ChangeTarget
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
@@ -45,7 +46,30 @@ sealed interface CleanerPanel {
     data class Results(
         val action: PackageAction,
         val outcomes: List<ChangeOutcome>,
-    ) : CleanerPanel
+    ) : CleanerPanel {
+        /**
+         * Whether this batch contains a main-space Shizuku failure where an enabled (or required
+         * for unhiding) Dhizuku enhancement channel would assist once installed and authorized.
+         */
+        internal fun needsDhizukuNotice(
+            backend: PrivilegeBackend,
+            currentUserId: Int?,
+            dhizukuFallbackEnabled: Boolean,
+        ): Boolean {
+            if (backend != PrivilegeBackend.SHIZUKU || currentUserId == null) return false
+            return outcomes.any { outcome ->
+                if (outcome.success || outcome.target.userId != currentUserId) return@any false
+                when (outcome.failure) {
+                    ChangeFailure.HiddenByDeviceOwner -> true
+                    is ChangeFailure.SystemError,
+                    ChangeFailure.OperationDenied,
+                    ChangeFailure.StateUnchanged,
+                    ChangeFailure.SpaceOperationDenied -> dhizukuFallbackEnabled
+                    else -> false
+                }
+            }
+        }
+    }
 }
 
 /**

@@ -3,8 +3,10 @@ package com.eynnzerr.telemetrycleaner.feature.packages
 import com.eynnzerr.telemetrycleaner.BuildConfig
 import com.eynnzerr.telemetrycleaner.data.CriticalSystemPackages
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
+import com.eynnzerr.telemetrycleaner.data.PackageFamily
 import com.eynnzerr.telemetrycleaner.data.isExactPackageName
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,6 +31,16 @@ class PackageDirectoryValidationTest {
         for (name in names) {
             assertTrue("Malformed package name: $name", isExactPackageName(name))
         }
+    }
+
+    @Test
+    fun xiaomiSystemAdServiceIsBundled() {
+        val xiaomiEntries = PackageDirectory.groups.getValue(PackageFamily.XIAOMI)
+        assertTrue(
+            "MSA was verified as the system advertising service on HyperOS",
+            xiaomiEntries.any { it.packageName == "com.miui.systemAdSolution" },
+        )
+        assertFalse("com.miui.systemAdSolution" in PackageDirectory.autoCleanupNames)
     }
 
     @Test
@@ -67,6 +79,7 @@ class PackageDirectoryValidationTest {
             "cn.nubia.launcher",
             "com.android.shell",
             "moe.shizuku.privileged.api",
+            "com.rosan.dhizuku",
             BuildConfig.APPLICATION_ID,
         )
         for (name in criticalSamples) {
@@ -79,6 +92,10 @@ class PackageDirectoryValidationTest {
         assertEquals(
             AddCustomPackageStatus.AlreadyBundled,
             validateCustomPackageInput("com.mobiletools.systemhelper", emptySet()),
+        )
+        assertEquals(
+            AddCustomPackageStatus.AlreadyBundled,
+            validateCustomPackageInput("com.oplus.olc", emptySet()),
         )
         assertEquals(
             AddCustomPackageStatus.AlreadyAdded,
@@ -97,7 +114,6 @@ class PackageDirectoryValidationTest {
             "com.coloros.phonemanager",
             "com.oplus.safecenter",
             "com.coloros.activation",
-            "com.oplus.olc",
             "com.iqoo.secure",
             "com.huawei.systemmanager",
             "com.huawei.hwid",

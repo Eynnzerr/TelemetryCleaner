@@ -133,12 +133,17 @@ class MainActivity : ComponentActivity() {
                     },
                     entryProvider = entryProvider {
                         entry<Destination.Cleaner> {
+                            val currentSettings = settingsState.value
                             CleanerScreen(
                                 state = cleanerState.value,
                                 onIntent = cleanerViewModel::dispatch,
                                 onOpenSettings = { navigateIfAt(Destination.Cleaner, Destination.Settings) },
-                                customPackageNames = settingsState.value.customPackageNames,
+                                customPackageNames = currentSettings.customPackageNames,
                                 onRemoveCustomPackage = cleanerViewModel::removeCustomPackage,
+                                dhizukuFallbackEnabled = currentSettings.dhizukuFallbackEnabled == true,
+                                dhizukuStatus = currentSettings.dhizukuStatus,
+                                onRequestDhizukuPermission = settingsViewModel::requestDhizukuPermission,
+                                onRefreshDhizukuStatus = settingsViewModel::refreshDhizukuStatus,
                             )
                         }
                         entry<Destination.Settings> {
@@ -146,6 +151,11 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 state = cleanerState.value,
                                 onSelectBackend = { cleanerViewModel.dispatch(CleanerIntent.SelectBackend(it)) },
+                                dhizukuFallbackEnabled = currentSettings.dhizukuFallbackEnabled,
+                                dhizukuStatus = currentSettings.dhizukuStatus,
+                                onDhizukuFallbackChange = settingsViewModel::setDhizukuFallbackEnabled,
+                                onRequestDhizukuPermission = settingsViewModel::requestDhizukuPermission,
+                                onRefreshDhizukuStatus = settingsViewModel::refreshDhizukuStatus,
                                 autoCleanupEnabled = currentSettings.autoCleanupEnabled,
                                 autoCleanupStatus = currentSettings.autoCleanupStatus,
                                 autoCleanupIntervalMinutes = currentSettings.autoCleanupIntervalMinutes,
@@ -153,8 +163,6 @@ class MainActivity : ComponentActivity() {
                                     if (enabled) enableAutoCleanup() else settingsViewModel.disableAutoCleanup()
                                 },
                                 onAutoCleanupIntervalChange = settingsViewModel::setAutoCleanupInterval,
-                                disableOnUninstallFailure = currentSettings.disableOnUninstallFailure,
-                                onDisableOnUninstallFailureChange = settingsViewModel::setDisableOnUninstallFailure,
                                 onToggleSpace = { cleanerViewModel.dispatch(CleanerIntent.ToggleSpace(it)) },
                                 onOpenAutoCleanupHistory = {
                                     navigateIfAt(Destination.Settings, Destination.AutoCleanupHistory)
@@ -213,6 +221,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         lifecycleScope.launch { AutoCleanupService.startIfEnabled(this@MainActivity, settings) }
         cleanerViewModel.dispatch(CleanerIntent.Refresh)
+        settingsViewModel.refreshDhizukuStatus()
     }
 
     /** Routes one-shot ViewModel side effects (toasts, foreground service control) to Android APIs. */

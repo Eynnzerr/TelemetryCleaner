@@ -1,6 +1,6 @@
 # 机型实测与使用反馈
 
-整理自 [GitHub Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues?q=is%3Aissue) 的社区真机反馈（截至 2026-11-22，涉及 v1.3–v1.4）。表中「—」表示原反馈未提供，欢迎继续提交新机型实测。
+整理自 [GitHub Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues?q=is%3Aissue) 的社区真机反馈（截至 2026-11-22，涉及 v1.3–v1.4）。表中「—」表示原反馈未提供，欢迎在 [Discussions](https://github.com/Eynnzerr/TelemetryCleaner/discussions) 继续提交新机型实测。
 
 ## 各厂商实测速览
 

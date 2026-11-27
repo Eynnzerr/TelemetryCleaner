@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 使用提问、机型实测与讨论（Discussions）
+    url: https://github.com/Eynnzerr/TelemetryCleaner/discussions
+    about: 使用咨询、Shizuku/Root 配置排查、新机型卸载/冻结实测反馈、功能想法或一般交流请前往 Discussions。
+  - name: 📖 机型实测与已知问题汇总
+    url: https://github.com/Eynnzerr/TelemetryCleaner/blob/main/docs/user-feedback.md
+    about: 提交问题前，可先查看已整理的各厂商机型实测结果与已知限制（如 vivo com.vivo.devicereg 免 Root 限制）。

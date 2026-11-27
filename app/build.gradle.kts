@@ -35,7 +35,7 @@ android {
         minSdk = 29
         targetSdk = 37
         versionCode = 9
-        versionName = "1.5.2"
+        versionName = "1.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -86,6 +86,8 @@ dependencies {
     implementation(libs.koin.android)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
+    implementation(libs.dhizuku.api)
+    implementation(libs.hiddenapibypass)
     implementation(libs.libsu.core)
     implementation(libs.kotlinx.serialization.core)
     testImplementation(libs.junit)

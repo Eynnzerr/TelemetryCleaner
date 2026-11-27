@@ -25,6 +25,7 @@ import com.eynnzerr.telemetrycleaner.data.ChangeOutcome
 import com.eynnzerr.telemetrycleaner.data.ChangeTarget
 import com.eynnzerr.telemetrycleaner.data.ComponentPermission
 import com.eynnzerr.telemetrycleaner.data.DetectedPackage
+import com.eynnzerr.telemetrycleaner.data.DhizukuStatus
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.PackageDirectory
 import com.eynnzerr.telemetrycleaner.data.PackageEntry
@@ -255,11 +256,11 @@ internal class CleanerSheetPreviewProvider : PreviewParameterProvider<CleanerSta
                 ),
             ),
         ),
-        "卸载结果 · 已停用" to scannedState(samplePackage(shared, PackageState.DISABLED)).copy(
+        "冻结结果 · 已隐藏" to scannedState(samplePackage(shared, PackageState.HIDDEN)).copy(
             panel = CleanerPanel.Results(
-                PackageAction.UNINSTALL,
+                PackageAction.DISABLE,
                 listOf(
-                    ChangeOutcome(ChangeTarget(shared.packageName, owner.id), false, null, disabledInstead = true),
+                    ChangeOutcome(ChangeTarget(shared.packageName, owner.id), true, null, hiddenInstead = true),
                 ),
             ),
         ),
@@ -351,11 +352,37 @@ private fun PackagePermissionsStatePreview(
     CleanerSheetPreviewContent(state, showPermissionsInitially = true)
 }
 
+/** Previews the results sheet when Dhizuku enhancement is enabled but not authorized or installed. */
+@Preview(name = "卸载失败 · Dhizuku 未授权", group = "底部面板", widthDp = 400, heightDp = 850, locale = "zh-rCN")
+@Composable
+private fun DhizukuUnreadyResultsPreview() {
+    val state = scannedState(samplePackage(shared, PackageState.INSTALLED)).copy(
+        panel = CleanerPanel.Results(
+            PackageAction.UNINSTALL,
+            listOf(
+                ChangeOutcome(
+                    ChangeTarget(shared.packageName, owner.id),
+                    success = false,
+                    failure = ChangeFailure.SystemError("Failure [DELETE_FAILED_USER_RESTRICTED]"),
+                    denialLog = "${shared.packageName} (user ${owner.id})\nFailure [DELETE_FAILED_USER_RESTRICTED]",
+                ),
+            ),
+        ),
+    )
+    CleanerSheetPreviewContent(
+        state = state,
+        dhizukuFallbackEnabled = true,
+        dhizukuStatus = DhizukuStatus.PERMISSION_REQUIRED,
+    )
+}
+
 /** Provides the production sheet shell to static overview and permission previews. */
 @Composable
 private fun CleanerSheetPreviewContent(
     state: CleanerState,
     showPermissionsInitially: Boolean = false,
+    dhizukuFallbackEnabled: Boolean = false,
+    dhizukuStatus: DhizukuStatus = DhizukuStatus.MISSING,
 ) {
     TelemetryCleanerTheme(dynamicColor = false) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -372,7 +399,12 @@ private fun CleanerSheetPreviewContent(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     BottomSheetDefaults.DragHandle()
                     CleanerSheetContent(
-                        checkNotNull(state.panel), state, onIntent = {}, showPermissionsInitially = showPermissionsInitially,
+                        checkNotNull(state.panel),
+                        state,
+                        onIntent = {},
+                        showPermissionsInitially = showPermissionsInitially,
+                        dhizukuFallbackEnabled = dhizukuFallbackEnabled,
+                        dhizukuStatus = dhizukuStatus,
                     )
                 }
             }
@@ -459,13 +491,16 @@ private fun SettingsScreenPreview(
         SettingsScreen(
             state = state,
             onSelectBackend = {},
+            dhizukuFallbackEnabled = true,
+            dhizukuStatus = DhizukuStatus.READY,
+            onDhizukuFallbackChange = {},
+            onRequestDhizukuPermission = {},
+            onRefreshDhizukuStatus = {},
             autoCleanupEnabled = status != AutoCleanupStatus.OFF,
             autoCleanupStatus = status,
             autoCleanupIntervalMinutes = intervalMinutes,
             onAutoCleanupChange = {},
             onAutoCleanupIntervalChange = {},
-            disableOnUninstallFailure = true,
-            onDisableOnUninstallFailureChange = {},
             onToggleSpace = {},
             onOpenAutoCleanupHistory = {},
             onOpenPackageDirectory = {},

@@ -111,7 +111,8 @@ internal fun CleanerState.summaryStatusKey(): SummaryStatusKey {
             selectedUserIds.any { userId ->
                 result.users[userId] == PackageState.INSTALLED ||
                     result.users[userId] == PackageState.DISABLED ||
-                    result.users[userId] == PackageState.SUSPENDED
+                    result.users[userId] == PackageState.SUSPENDED ||
+                    result.users[userId] == PackageState.HIDDEN
             }
         }
     } else {

@@ -1,12 +1,15 @@
 # ColorOS 对 com.oplus.olc 的卸载保护分析
 
-实测机型：OPPO PGEM10（ColorOS 16 / Android 16，`PGEM10_16.0.2.401(CN01)`）。实测日期：2026-11-19。测试时设备未 Root、未解锁 Bootloader，使用 ADB shell、系统设置/应用详情界面，以及项目现有的 Shizuku 与 `app_process` 路径。
+实测机型：OPPO PGEM10（ColorOS 16 / Android 16，`PGEM10_16.0.2.401(CN01)`）。首次实测日期：2026-11-19；补充实测日期：2026-11-26（同一台未 Root 真机，新增 Dhizuku v2.13.0 设备所有者通道）。测试时设备未 Root、未解锁 Bootloader，使用 ADB shell、系统设置/应用详情界面、项目现有的 Shizuku / `app_process` 路径，以及 2026-11-26 集成的 Dhizuku 增强通道。
 
 ## 结论
 
-`com.oplus.olc` 是 OPPO 预置的「日志服务」，位于 `/system_ext`，不是运营商组件。它同时受 ColorOS 的卸载保护和 Android 的系统应用删除规则约束，**本次实测中，非 Root 的 ADB、Shizuku 和 `app_process` 都无法卸载；停用也会被 ColorOS 拒绝**。在本文测试范围内，唯一可行的用户侧路径是 Root 后以 UID 0 执行按用户卸载。
+`com.oplus.olc` 是 OPPO 预置的「日志服务」，位于 `/system_ext`，不是运营商组件。它同时受 ColorOS 的卸载/停用隐藏保护和 Android 的系统应用删除规则约束：
 
-本文对应一项清单调整：从 `PackageDirectory.kt` 的 `COLOR_OS` 分组移除 `com.oplus.olc`。README 的运营商组件表本来没有这个包，因此不需要改表。
+- **纯 shell 路径（2026-11-19）**：非 Root 的 ADB、Shizuku 和 `app_process`（UID 2000）均无法卸载；停用也会被 ColorOS 拒绝。
+- **Dhizuku（Device Owner）路径（2026-11-26 补充实测）**：同一台未 Root 真机上，通过 Dhizuku 代理 `IPackageInstaller.uninstall(..., DELETE_SYSTEM_APP)` 可在**主空间（用户 0）免 Root 成功卸载并恢复 `com.oplus.olc`**；但**停用/隐藏（「仅冻结」）仍会被 ColorOS 拦截**。系统分身（用户 10）超出 Device Owner 作用域，仍需 Root（UID 0）处理。
+
+本文对应清单变更记录：2026-11-19 曾因无免 Root 路径将其从 `PackageDirectory.kt` 的 `COLOR_OS` 分组移除；2026-11-26 在真机验证 Dhizuku 免 Root 卸载与恢复可行后，已将 `com.oplus.olc` 重新保留回 `COLOR_OS` 分组（仍不加入 `autoCleanupNames`）。README 的运营商组件表本来没有这个包，因此不需要改表。
 
 ## 包信息
 
@@ -115,6 +118,43 @@ W/OplusForbidUninstallAppManager: Cannot uninstall customize protect app com.opl
 
 卸载失败后的 disable 兜底对 OLC 同样无效，因为 `OplusForbidHideOrDisableManager` 会拒绝停用。对带 `ForbidUninstall` 的包，建议直接跳过 disable 兜底，避免给用户“至少停用了”的错误预期。
 
+## 2026-11-26 补充实测：Dhizuku（Device Owner）免 Root 路径
+
+在项目中集成可选的 Dhizuku（Device Owner）增强通道后，于同一台未 Root 的 OPPO PGEM10（ColorOS 16 / Android 16）安装官方签名版 Dhizuku `v2.13.0` 并激活 Device Owner，使用 TelemetryCleaner 开启「Dhizuku 增强」后对 `com.oplus.olc` 做了完整实测。
+
+### 为什么 Dhizuku 可以免 Root 卸载与恢复
+
+AOSP `PackageInstallerService.uninstall(...)` 在判定调用方具备 Device Owner 静默安装/卸载资格（`dpmi.canSilentlyInstallPackage`）时，会先执行 `Binder.clearCallingIdentity()`，再调用四参数 `mPm.deletePackageVersioned(versionedPackage, adapter.getBinder(), userId, flags)`。结果是：
+
+1. 进入 PMS 时调用方身份变为 **`UID 1000`（`system_server`）**，不再命中 `OplusForbidUninstallAppManager` 的 `uid2 == 2000`（shell）专用拦截分支；
+2. 保留了调用方传入的 `PackageManager.DELETE_SYSTEM_APP`（`flags = 4`），从而通过 AOSP `DeletePackageHelper.mayDeletePackageLocked()` 的系统应用删除检查。
+
+两层校验同时放行，因此可在主空间（用户 0）免 Root 完成按用户卸载，并可通过系统保留在 `/system_ext` 的 APK 正常恢复。
+
+### 为什么「仅冻结」仍然失败
+
+手动选择「仅冻结」时，Shizuku 的 `pm disable-user` 与 Dhizuku 兜底调用的 `DevicePolicyManager.setApplicationHidden(..., true)` 均被 ColorOS 拦截。与 `OplusForbidUninstallAppManager` 只盯 `uid2 == 2000` 不同，`OplusForbidHideOrDisableManager` 对受保护应用的停用与隐藏检查不区分 shell 与 Device Owner（UID 1000），因此即使通过 Dhizuku 也无法隐藏 `com.oplus.olc`。
+
+### 真机实测结果与日志节选
+
+| 入口 | 操作 | 结果 |
+| --- | --- | --- |
+| TelemetryCleaner（Shizuku + Dhizuku 增强） | 主空间卸载 `com.oplus.olc` | **成功**：前两层 shell 路径被拦截后自动回落到 Dhizuku `IPackageInstaller`，用户 0 卸载成功并停止进程 |
+| TelemetryCleaner（Shizuku + Dhizuku 增强） | 主空间恢复 `com.oplus.olc` | **成功**：使用 `/system_ext` 预置 APK 恢复为已安装 |
+| TelemetryCleaner（Shizuku + Dhizuku 增强） | 主空间「仅冻结」`com.oplus.olc` | **失败**：`disable-user` 与 Dhizuku `setApplicationHidden` 均被 `OplusForbidHideOrDisableManager` 拒绝 |
+
+对应时刻的真机 `logcat` 关键记录：
+
+```text
+21:33:18.198  W OplusForbidUninstallAppManager: Cannot uninstall customize protect app com.oplus.olc
+21:33:18.744  W OplusForbidUninstallAppManager: Cannot uninstall customize protect app com.oplus.olc
+21:33:22.938  I ActivityManager: Force stopping com.oplus.olc appid=1000 user=0: deletePackageX
+21:33:41.642  W OplusForbidHideOrDisableManager: Cannot disable protect app com.oplus.olc
+21:33:41.674  W OplusForbidHideOrDisableManager: Cannot hiding protect app com.oplus.olc
+```
+
+限制：Device Owner 作用域仅限主空间（用户 0），系统分身（用户 10 `system_clone`）无法经由 Dhizuku 处理，如需卸载分身实例仍需 Root。
+
 ## 可行的 Root 路径
 
 UID 0 不进入 ColorOS 的 `uid2 == 2000` 分支，`pm uninstall` 又会为系统应用补上 `DELETE_SYSTEM_APP`，所以两层都能过。理论上执行：
@@ -136,11 +176,11 @@ adb shell su -c 'pm install-existing --user 0 com.oplus.olc'
 
 ## 对项目的调整
 
-1. 已从 `PackageDirectory.kt` 的 `COLOR_OS` 分组移除 `com.oplus.olc`。它不是运营商组件，且当前没有非 Root 的可用卸载路径，继续放在组件检查清单里会让用户误以为可以由 Shizuku 管理。
-2. 保留 `DELETE_SYSTEM_APP` 兜底。它对其他 ROM 的“系统应用删除”场景仍然有价值，只是无法解决 ColorOS 的 shell 专用保护。
-3. 可考虑在扫描阶段读取 `ApplicationInfo.metaData` 的 `ForbidUninstall`、`ForbidDisabled`，并结合 `sharedUserId=android.uid.system` / `PERSISTENT` 标记为「ROM 保护，仅 Root」。卸载失败时识别 `OplusForbidUninstallAppManager` 日志，给出明确提示，而不是泛化的 `DELETE_FAILED_INTERNAL_ERROR`。
-4. 不建议把 OLC 放进自动清理名单。它本来也不在 `autoCleanupNames` 中；保留这个状态即可。
+1. **保留 `com.oplus.olc` 在 `PackageDirectory.kt` 的 `COLOR_OS` 分组中**：2026-11-19 因纯 Shizuku 不可卸载曾将其移除；2026-11-26 集成并真机验证 Dhizuku 增强通道后已重新收录，未 Root 用户可在设置中启用「Dhizuku 增强」完成主空间卸载与恢复。
+2. **保留 `DELETE_SYSTEM_APP` 兜底，并增加可选的 Dhizuku 增强通道**：见 [DhizukuBridge.kt](../../app/src/main/java/com/eynnzerr/telemetrycleaner/data/packagemanager/DhizukuBridge.kt)。
+3. **移除「卸载失败时尝试冻结」设置与自动回落**：无论对 ColorOS 的 `com.oplus.olc` 还是对 vivo 的 `com.vivo.devicereg`，卸载失败后自动尝试 `disable-user` 都会被系统同样拒绝，反而掩盖卸载失败本身；现已删除该选项，仅保留操作确认页里的手动「仅冻结」切换。
+4. **不将 OLC 放进自动清理名单**：保持不在 `autoCleanupNames` 中，仅允许手动操作。
 
 ## 设备状态
 
-测试结束后包仍安装在用户 0 和用户 10，`stopped=false`，进程仍在运行。没有清数据、没有安装更新、没有修改系统设置；临时 force-stop 后已用 `pm unstop` 恢复。测试文件已清理，项目代码只做了上述清单条目删除。
+两次测试结束后，均已将 `com.oplus.olc` 恢复为已安装状态，未对系统设置或用户数据造成破坏。

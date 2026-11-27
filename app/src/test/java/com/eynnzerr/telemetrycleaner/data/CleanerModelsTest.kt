@@ -220,5 +220,32 @@ class CleanerModelsTest {
             users = mapOf(0 to PackageState.INSTALLED, 10 to PackageState.DISABLED),
         )
         assertFalse(disabledOtherSpace.losesApkOnUninstall(setOf(0, 10)))
+
+        val hiddenOtherSpace = multiSpaceUserApp.copy(
+            users = mapOf(0 to PackageState.INSTALLED, 10 to PackageState.HIDDEN),
+        )
+        assertFalse(hiddenOtherSpace.losesApkOnUninstall(setOf(0, 10)))
+    }
+
+    @Test
+    fun targetsFor_handlesHiddenPackagesForRestoreAndExcludesFromDefaultUninstall() {
+        val hiddenEntry = PackageEntry("com.vivo.devicereg", "Device Management", emptySet())
+        val detected = DetectedPackage(
+            entry = hiddenEntry,
+            versionName = "5.4.0.0",
+            versionCode = 54000L,
+            systemPath = "/system/app/DeviceReg",
+            users = mapOf(0 to PackageState.HIDDEN),
+            hasVerifiedSystemIdentity = true,
+        )
+
+        assertTrue(detected.hasVisibleRecord())
+        assertTrue(detected.hasActionIn(setOf(0)))
+        assertTrue(detected.targetsFor(PackageAction.UNINSTALL, setOf(0), requireVerifiedSystemIdentity = false).isEmpty())
+        assertTrue(detected.targetsFor(PackageAction.DISABLE, setOf(0), requireVerifiedSystemIdentity = false).isEmpty())
+        assertEquals(
+            listOf(ChangeTarget(hiddenEntry.packageName, 0)),
+            detected.targetsFor(PackageAction.RESTORE, setOf(0), requireVerifiedSystemIdentity = false),
+        )
     }
 }

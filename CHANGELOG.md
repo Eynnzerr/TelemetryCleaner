@@ -11,6 +11,13 @@
 - 修复的问题说明
 -->
 
+## [v1.6] - 2026-11-26
+
+1. Shizuku 模式新增可选的「Dhizuku 增强」通道（设置 → 权限来源，默认关闭）：在纯 shell 身份（UID 2000）被系统卸载或冻结拦截时，自动通过已激活并授权的 Dhizuku（设备所有者）代理 `PackageInstaller` / `DevicePolicyManager` 处理主空间受保护组件，支持「已隐藏」状态识别与恢复，并将 `com.rosan.dhizuku` 加入受保护包名单（[#52](https://github.com/Eynnzerr/TelemetryCleaner/issues/52)）；
+2. 操作结果面板在已开启 Dhizuku 增强且主空间操作失败、但 Dhizuku 未安装 / 未激活 / 未授权时，直接展示状态提示与快捷操作按钮，授权或激活后实时更新就绪状态；
+3. 重新在 OPPO / 一加 / realme 分组保留 `com.oplus.olc`（OLC 日志服务，默认不加入自动清理），并补充未 Root ColorOS 16 真机通过 Dhizuku 卸载与恢复的实测报告；
+4. 移除「卸载失败时尝试冻结」设置项及卸载自动回落停用逻辑，保留操作确认页中的手动「仅冻结」切换。
+
 ## [v1.5.2] - 2026-11-24
 
 1. 组件清单新增 OPPO、小米、华为、荣耀、魅族、努比亚、三星、Moto、中兴的厂商遥测/诊断组件，默认不参与自动清理；

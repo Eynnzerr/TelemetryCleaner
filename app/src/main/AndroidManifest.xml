@@ -45,6 +45,10 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".data.packagemanager.DhizukuUninstallReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:enableOnBackInvokedCallback="true"

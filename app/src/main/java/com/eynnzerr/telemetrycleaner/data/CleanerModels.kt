@@ -8,6 +8,11 @@ enum class PrivilegeStatus {
     MISSING, STOPPED, PERMISSION_REQUIRED, CONNECTING, READY, ERROR
 }
 
+/** Availability of the optional Dhizuku Device Owner bridge used to assist Shizuku operations. */
+enum class DhizukuStatus {
+    MISSING, INACTIVE, PERMISSION_REQUIRED, READY, ERROR
+}
+
 /**
  * The backend selected for both manual operations and automatic cleanup.
  *
@@ -52,6 +57,7 @@ enum class PackageState {
     INSTALLED,
     DISABLED,
     SUSPENDED,
+    HIDDEN,
     RESTORABLE,
     NOT_FOUND,
     UNKNOWN,
@@ -109,6 +115,7 @@ data class DetectedPackage(
         it == PackageState.INSTALLED ||
             it == PackageState.DISABLED ||
             it == PackageState.SUSPENDED ||
+            it == PackageState.HIDDEN ||
             it == PackageState.RESTORABLE
     }
 
@@ -121,6 +128,7 @@ data class DetectedPackage(
             status == PackageState.UNKNOWN ||
                 status == PackageState.DISABLED ||
                 status == PackageState.SUSPENDED ||
+                status == PackageState.HIDDEN ||
                 (userId !in targetUserIds && status == PackageState.INSTALLED)
         }
 
@@ -131,6 +139,7 @@ data class DetectedPackage(
             state == PackageState.INSTALLED ||
                 state == PackageState.SUSPENDED ||
                 state == PackageState.RESTORABLE ||
+                state == PackageState.HIDDEN ||
                 (state == PackageState.DISABLED && userId in userDisabledIds)
         }
 
@@ -148,9 +157,14 @@ data class DetectedPackage(
             val state = users[userId]
             when (action) {
                 PackageAction.UNINSTALL -> state.permits(action) &&
-                    (includeDisabledForUninstall || (state != PackageState.DISABLED && state != PackageState.SUSPENDED))
+                    (includeDisabledForUninstall || (
+                        state != PackageState.DISABLED &&
+                            state != PackageState.SUSPENDED &&
+                            state != PackageState.HIDDEN
+                    ))
                 PackageAction.DISABLE -> state.permits(action)
                 PackageAction.RESTORE -> state.permits(action) ||
+                    state == PackageState.HIDDEN ||
                     (state == PackageState.DISABLED && userId in userDisabledIds)
             }
         }.map { userId ->
@@ -207,7 +221,8 @@ enum class PackageAction { UNINSTALL, DISABLE, RESTORE }
 internal fun PackageState?.permits(action: PackageAction): Boolean = when (action) {
     PackageAction.UNINSTALL -> this == PackageState.INSTALLED ||
         this == PackageState.DISABLED ||
-        this == PackageState.SUSPENDED
+        this == PackageState.SUSPENDED ||
+        this == PackageState.HIDDEN
     PackageAction.DISABLE -> this == PackageState.INSTALLED
     PackageAction.RESTORE -> this == PackageState.RESTORABLE || this == PackageState.SUSPENDED
 }
@@ -254,6 +269,9 @@ sealed interface ChangeFailure {
     /** The package was disabled by the system rather than the user and cannot be re-enabled. */
     data object DisabledBySystem : ChangeFailure
 
+    /** The package was hidden by a device owner and requires Dhizuku or Root to restore. */
+    data object HiddenByDeviceOwner : ChangeFailure
+
     /** Disable was requested for a package that is not currently enabled in this space. */
     data object NotEnabledInSpace : ChangeFailure
 
@@ -282,6 +300,7 @@ sealed interface ChangeFailure {
  * @property denialLog Diagnostics from a manual uninstall rejected by the package service.
  * @property disabledInstead Whether the fallback left the package installed and explicitly disabled.
  * @property suspendedInstead Whether the fallback paused the package through Android's suspension API.
+ * @property hiddenInstead Whether Dhizuku hid the package as a fallback when disabling it was blocked.
  */
 data class ChangeOutcome(
     val target: ChangeTarget,
@@ -290,4 +309,5 @@ data class ChangeOutcome(
     val denialLog: String? = null,
     val disabledInstead: Boolean = false,
     val suspendedInstead: Boolean = false,
+    val hiddenInstead: Boolean = false,
 )

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
@@ -30,7 +31,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TonalToggleButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
@@ -42,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.eynnzerr.telemetrycleaner.R
 import com.eynnzerr.telemetrycleaner.data.ChangeTarget
+import com.eynnzerr.telemetrycleaner.data.DhizukuStatus
 import com.eynnzerr.telemetrycleaner.data.PackageAction
 import com.eynnzerr.telemetrycleaner.data.ScanSnapshot
 import com.eynnzerr.telemetrycleaner.feature.cleaner.CleanerIntent
@@ -54,8 +61,10 @@ import com.eynnzerr.telemetrycleaner.ui.components.SegmentedListDefaults
 import com.eynnzerr.telemetrycleaner.ui.components.SheetTitle
 import com.eynnzerr.telemetrycleaner.ui.components.StatusBadge
 import com.eynnzerr.telemetrycleaner.ui.components.StatusTone
+import com.eynnzerr.telemetrycleaner.ui.components.actionLabel
 import com.eynnzerr.telemetrycleaner.ui.components.displayMessage
 import com.eynnzerr.telemetrycleaner.ui.components.displayName
+import com.eynnzerr.telemetrycleaner.ui.components.performDhizukuStatusAction
 import com.eynnzerr.telemetrycleaner.ui.components.segmentedItemShape
 import com.eynnzerr.telemetrycleaner.ui.packages.PackageDetailsSheetContent
 import kotlinx.coroutines.launch
@@ -67,6 +76,10 @@ internal fun CleanerSheetContent(
     state: CleanerState,
     onIntent: (CleanerIntent) -> Unit,
     showPermissionsInitially: Boolean = false,
+    dhizukuFallbackEnabled: Boolean = false,
+    dhizukuStatus: DhizukuStatus = DhizukuStatus.MISSING,
+    onRequestDhizukuPermission: () -> Unit = {},
+    onRefreshDhizukuStatus: () -> Unit = {},
 ) {
     val snapshot = state.snapshot
     val dismiss = { onIntent(CleanerIntent.DismissPanel) }
@@ -170,9 +183,35 @@ internal fun CleanerSheetContent(
         }
         is CleanerPanel.Results -> CleanerSheetLayout(Modifier.verticalScroll(scrollState)) {
             SheetTitle(R.string.operation_results)
-            val denialLogs = panel.outcomes.filterNot { it.success || it.disabledInstead }
-                .mapNotNull { it.denialLog }
+            val denialLogs = panel.outcomes.filterNot { it.success }.mapNotNull { it.denialLog }
             val canCopyDenialLogs = panel.action == PackageAction.UNINSTALL && denialLogs.isNotEmpty()
+            val dhizukuNoticeEligible = panel.needsDhizukuNotice(
+                backend = state.connection.backend,
+                currentUserId = snapshot?.currentUserId,
+                dhizukuFallbackEnabled = dhizukuFallbackEnabled,
+            )
+            var sawUnreadyDhizuku by remember(panel) {
+                mutableStateOf(dhizukuNoticeEligible && dhizukuStatus != DhizukuStatus.READY)
+            }
+            LaunchedEffect(panel, dhizukuNoticeEligible) {
+                if (dhizukuNoticeEligible) {
+                    onRefreshDhizukuStatus()
+                }
+            }
+            LaunchedEffect(dhizukuNoticeEligible, dhizukuStatus) {
+                if (dhizukuNoticeEligible && dhizukuStatus != DhizukuStatus.READY) {
+                    sawUnreadyDhizuku = true
+                }
+            }
+            val showDhizukuNotice = dhizukuNoticeEligible &&
+                (dhizukuStatus != DhizukuStatus.READY || sawUnreadyDhizuku)
+            if (showDhizukuNotice) {
+                DhizukuResultsNoticeCard(
+                    status = dhizukuStatus,
+                    onRequestPermission = onRequestDhizukuPermission,
+                    onRefreshStatus = onRefreshDhizukuStatus,
+                )
+            }
             if (canCopyDenialLogs) {
                 Text(
                     stringResource(R.string.uninstall_denial_feedback_hint),
@@ -183,14 +222,16 @@ internal fun CleanerSheetContent(
             Column(verticalArrangement = Arrangement.spacedBy(SegmentedListDefaults.Gap)) {
                 panel.outcomes.forEachIndexed { index, outcome ->
                     val (statusText, tone) = when {
-                        outcome.disabledInstead -> stringResource(R.string.disabled_instead_result) to StatusTone.SECONDARY
                         outcome.success && panel.action == PackageAction.UNINSTALL -> {
                             stringResource(R.string.uninstalled_result) to StatusTone.PRIMARY
                         }
                         outcome.success && panel.action == PackageAction.DISABLE -> {
-                            stringResource(
-                                if (outcome.suspendedInstead) R.string.status_suspended else R.string.status_disabled,
-                            ) to StatusTone.SECONDARY
+                            val res = when {
+                                outcome.suspendedInstead -> R.string.status_suspended
+                                outcome.hiddenInstead -> R.string.status_hidden
+                                else -> R.string.status_disabled
+                            }
+                            stringResource(res) to StatusTone.SECONDARY
                         }
                         outcome.success -> stringResource(R.string.restored_result) to StatusTone.PRIMARY
                         else -> (outcome.failure?.displayMessage() ?: stringResource(R.string.unverified_result)) to StatusTone.ERROR
@@ -212,6 +253,66 @@ internal fun CleanerSheetContent(
                     size = ExpressiveButtonSize.MEDIUM,
                     onClick = dismiss,
                 )
+            }
+        }
+    }
+}
+
+/** Explains why Dhizuku enhancement did not run and offers a direct setup or authorization action. */
+@Composable
+private fun DhizukuResultsNoticeCard(
+    status: DhizukuStatus,
+    onRequestPermission: () -> Unit,
+    onRefreshStatus: () -> Unit,
+) {
+    val context = LocalContext.current
+    val (containerColor, contentColor) = when (status) {
+        DhizukuStatus.READY -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        DhizukuStatus.ERROR -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    val titleRes = if (status == DhizukuStatus.READY) {
+        R.string.dhizuku_results_ready_title
+    } else {
+        R.string.dhizuku_results_inactive_title
+    }
+    val messageRes = when (status) {
+        DhizukuStatus.MISSING -> R.string.dhizuku_results_missing_message
+        DhizukuStatus.INACTIVE -> R.string.dhizuku_results_inactive_message
+        DhizukuStatus.PERMISSION_REQUIRED -> R.string.dhizuku_results_permission_message
+        DhizukuStatus.ERROR -> R.string.dhizuku_results_error_message
+        DhizukuStatus.READY -> R.string.dhizuku_results_ready_message
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(SegmentedListDefaults.OuterCorner),
+        color = containerColor,
+        contentColor = contentColor,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(titleRes),
+                style = MaterialTheme.typography.titleSmallEmphasized,
+            )
+            Text(
+                text = stringResource(messageRes),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (status != DhizukuStatus.READY) {
+                ExpressiveButton(
+                    label = status.actionLabel(),
+                    size = ExpressiveButtonSize.SMALL,
+                ) {
+                    performDhizukuStatusAction(
+                        context = context,
+                        status = status,
+                        onRequestPermission = onRequestPermission,
+                        onRefreshStatus = onRefreshStatus,
+                    )
+                }
             }
         }
     }
