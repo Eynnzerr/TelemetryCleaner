@@ -65,6 +65,17 @@ ADB 启动的 Shizuku 以 shell 身份代理 Binder 调用。App 直接请求系
 
 各厂商社区实测机型与已知问题整理见 [机型实测与使用反馈](docs/user-feedback.md)。欢迎在 [Discussions](https://github.com/Eynnzerr/TelemetryCleaner/discussions) 分享机型实测结果、使用提问或功能讨论；如遇到 Bug 或有未收录的新组件包名线索，请在 [Issues](https://github.com/Eynnzerr/TelemetryCleaner/issues) 提交。反馈时请尽量附上机型、系统版本、包名和实际结果，便于复核。
 
+
+### 待验证组件线索
+
+下列包名暂未加入 App 的检测、卸载或自动清理清单。
+
+| 厂商 | 疑似用途 | 包名 | 社区反馈 |
+| --- | --- | --- | --- |
+| 摩托罗拉 / Moto 国行 | 中国移动 / 中国电信终端自注册（待核实） | `com.motorola.regservice` | [#59](https://github.com/Eynnzerr/TelemetryCleaner/issues/59)：Moto g100s 报告可用 ADB 禁用；未提供固件版本，未验证卸载及对通话、短信、移动数据的影响 |
+
+[公开的 Moto X30 进程记录](https://newandroidbook.com/ddb/X30/)也出现了该包名。#59 所列域名与[中国移动](https://www.scss.tcd.ie/Doug.Leith/pubs/wisecfp034-liu.pdf#page=7)和[中国电信](https://nrfconnectdocs.nordicsemi.com/ncs/latest/nrf/libraries/modem/zzhc.html)的终端自注册服务吻合，但尚未在 Moto 样机上核实实际联网行为。
+
 ## WIP
 
 - [ ] 努比亚、国行三星、魅族运营商遥测组件包名收集
